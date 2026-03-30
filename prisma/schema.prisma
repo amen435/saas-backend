@@ -1,0 +1,830 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  TEACHER
+  HOMEROOM_TEACHER
+  STUDENT
+  PARENT
+}
+
+// ============================================
+// SUBJECTS (NEW!)
+// ============================================
+
+model Subject {
+  subjectId   Int      @id @default(autoincrement())
+  subjectCode String   @db.VarChar(50)
+  subjectName String   @db.VarChar(200)
+  description String?  @db.Text
+  schoolId    Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  school          School           @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  teachers        SubjectTeacher[] // Teachers assigned to this subject
+  gradeComponents GradeComponent[]
+  studentMarks    StudentMark[]
+  studentGrades   StudentGrade[]
+  timetable       Timetable[]
+  aiHomework      AiHomework[]
+
+  // Unique constraint: code must be unique within school
+  @@unique([schoolId, subjectCode])
+  @@index([schoolId])
+  @@index([subjectCode])
+  @@map("subjects")
+}
+
+// ============================================
+// SUBJECT_TEACHER (JUNCTION TABLE - NEW!)
+// ============================================
+
+model SubjectTeacher {
+  id         Int      @id @default(autoincrement())
+  subjectId  Int
+  teacherId  Int
+  assignedAt DateTime @default(now())
+
+  // Relations
+  subject Subject @relation(fields: [subjectId], references: [subjectId], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+
+  @@unique([subjectId, teacherId])
+  @@index([subjectId])
+  @@index([teacherId])
+  @@map("subject_teachers")
+}
+
+// ============================================
+// GRADE COMPONENTS (NEW!)
+// ============================================
+
+model GradeComponent {
+  componentId   Int      @id @default(autoincrement())
+  schoolId      Int
+  classId       Int
+  subjectId     Int
+  teacherId     Int
+  componentName String   @db.VarChar(100) // Quiz 1, Midterm, Final, etc.
+  componentType String   @db.VarChar(50) // QUIZ, ASSIGNMENT, MIDTERM, FINAL
+  weight        Float // Weight percentage (0-100)
+  description   String?  @db.Text
+  academicYear  String   @db.VarChar(20)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  school       School        @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class        Class         @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  subject      Subject       @relation(fields: [subjectId], references: [subjectId], onDelete: Cascade)
+  teacher      Teacher       @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+  studentMarks StudentMark[] // Marks for this component
+
+  @@unique([schoolId, classId, subjectId, teacherId, componentName, academicYear])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([subjectId])
+  @@index([teacherId])
+  @@index([academicYear])
+  @@map("grade_components")
+}
+
+// ============================================
+// STUDENT MARKS (NEW!)
+// ============================================
+
+model StudentMark {
+  markId        Int      @id @default(autoincrement())
+  studentId     Int
+  componentId   Int
+  schoolId      Int
+  classId       Int
+  subjectId     Int
+  marksObtained Float // Marks obtained (0 to component.weight)
+  percentage    Float // Percentage of component weight
+  academicYear  String   @db.VarChar(20)
+  remarks       String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  student   Student        @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+  component GradeComponent @relation(fields: [componentId], references: [componentId], onDelete: Cascade)
+  school    School         @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class     Class          @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  subject   Subject        @relation(fields: [subjectId], references: [subjectId], onDelete: Cascade)
+
+  @@unique([studentId, componentId])
+  @@index([studentId])
+  @@index([componentId])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([subjectId])
+  @@index([academicYear])
+  @@map("student_marks")
+}
+
+// ============================================
+// STUDENT GRADES (CALCULATED TOTALS - NEW!)
+// ============================================
+
+model StudentGrade {
+  gradeId      Int      @id @default(autoincrement())
+  studentId    Int
+  schoolId     Int
+  classId      Int
+  subjectId    Int
+  teacherId    Int
+  academicYear String   @db.VarChar(20)
+  totalScore   Float    @default(0) // Sum of all component marks
+  percentage   Float    @default(0) // Total percentage
+  status       String   @db.VarChar(20) // PASS, FAIL
+  rank         Int? // Rank in class for this subject
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  student Student @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+  school  School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [subjectId], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+
+  @@unique([studentId, classId, subjectId, teacherId, academicYear])
+  @@index([studentId])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([subjectId])
+  @@index([teacherId])
+  @@index([academicYear])
+  @@index([totalScore])
+  @@map("student_grades")
+}
+
+// ============================================
+// SCHOOLS
+// ============================================
+
+model School {
+  schoolId   Int       @id @default(autoincrement())
+  schoolCode String    @unique @db.VarChar(50)
+  schoolName String    @db.VarChar(200)
+  logo       String?   @db.VarChar(500)
+  address    String?   @db.Text
+  city       String?   @db.VarChar(100)
+  country    String    @default("Ethiopia") @db.VarChar(100)
+  expiryDate DateTime?
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  // Relations
+  users               User[]
+  teachers            Teacher[]
+  classes             Class[]
+  students            Student[]
+  parents             Parent[] // ← Add this
+  subjects            Subject[] // ← Add this
+  gradeComponents     GradeComponent[]
+  studentMarks        StudentMark[]
+  studentGrades       StudentGrade[]
+  grades              Grade[]
+  attendance          Attendance[]
+  teacherAttendance   TeacherAttendance[]
+  messages            Message[]
+  announcements       Announcement[]
+  timetable           Timetable[]
+  periodConfiguration PeriodConfiguration[]
+  breakConfiguration  BreakConfiguration[]
+  aiChatHistory         AiChatHistory[]
+  aiHomework            AiHomework[]
+  aiHomeworkSubmissions AiHomeworkSubmission[]
+  aiAnalyticsCache      AiAnalyticsCache[]
+
+  @@index([schoolCode])
+  @@index([isActive])
+  @@map("schools")
+}
+
+// ============================================
+// USERS
+// ============================================
+
+model User {
+  userId         String    @id @db.VarChar(50)
+  username       String?   @unique @db.VarChar(100)
+  email          String?   @unique @db.VarChar(100)
+  passwordHash   String    @db.VarChar(255)
+  role           UserRole
+  schoolId       Int?
+  fullName       String    @db.VarChar(200)
+  profileImage   String?   @db.VarChar(500)
+  phone          String?   @db.VarChar(20)
+  isActive       Boolean   @default(true)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  lastLogin      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  school                    School?             @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  teacher                   Teacher? // One-to-one with Teacher
+  student                   Student?
+  parent                    Parent?
+  recordedTeacherAttendance TeacherAttendance[]
+  sentMessages              Message[]           @relation("SentMessages")
+  receivedMessages          Message[]           @relation("ReceivedMessages")
+  announcements             Announcement[]
+  timetable                 Timetable[]
+  aiChatHistory             AiChatHistory[]
+
+  @@index([schoolId])
+  @@index([role])
+  @@index([username])
+  @@index([email])
+  @@map("users")
+}
+
+// ============================================
+// PARENTS (NEW!)
+// ============================================
+
+model Parent {
+  parentId     Int      @id @default(autoincrement())
+  userId       String   @unique @db.VarChar(50)
+  schoolId     Int
+  relationship String?  @db.VarChar(50) // Father, Mother, Guardian
+  occupation   String?  @db.VarChar(100)
+  // Unique identifier for reusing an existing parent account (prevents duplicates).
+  // NOTE: older records may not have this populated yet, so backend code should
+  // be tolerant (e.g., fallback to User.phone when Parent.phoneNumber is NULL).
+  phoneNumber  String?  @unique @db.VarChar(20)
+  address      String?  @db.Text
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  user     User            @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  school   School          @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  children ParentStudent[] // Link to students
+
+  @@index([schoolId])
+  @@index([userId])
+  @@map("parents")
+}
+
+// ============================================
+// PARENT_STUDENT (JUNCTION TABLE - NEW!)
+// ============================================
+
+model ParentStudent {
+  id           Int      @id @default(autoincrement())
+  parentId     Int
+  studentId    Int
+  relationship String   @db.VarChar(50) // Father, Mother, Guardian
+  isPrimary    Boolean  @default(false) // Primary contact parent
+  createdAt    DateTime @default(now())
+
+  // Relations
+  parent  Parent  @relation(fields: [parentId], references: [parentId], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+
+  @@unique([parentId, studentId])
+  @@index([parentId])
+  @@index([studentId])
+  @@map("parent_students")
+}
+
+// ============================================
+// STUDENTS (NEW!)
+// ============================================
+
+model Student {
+  studentId      Int       @id @default(autoincrement())
+  userId         String    @unique @db.VarChar(50)
+  schoolId       Int
+  classId        Int
+  studentCode    String?   @unique @db.VarChar(50) // Optional student code
+  dateOfBirth    DateTime?
+  gender         String?   @db.VarChar(10) // Male, Female
+  guardianName   String?   @db.VarChar(200)
+  guardianPhone  String?   @db.VarChar(20)
+  address        String?   @db.Text
+  enrollmentDate DateTime  @default(now())
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  user         User            @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  school       School          @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class        Class           @relation(fields: [classId], references: [classId], onDelete: Restrict)
+  parents      ParentStudent[]
+  marks        StudentMark[]
+  grades       StudentGrade[]
+  gradeEntries Grade[]
+  attendance            Attendance[]
+  aiHomeworkSubmissions AiHomeworkSubmission[]
+
+  @@index([schoolId])
+  @@index([classId])
+  @@index([userId])
+  @@map("students")
+}
+
+// ============================================
+// TEACHER ATTENDANCE (NEW!)
+// ============================================
+
+model TeacherAttendance {
+  teacherAttendanceId Int              @id @default(autoincrement())
+  teacherId           Int
+  schoolId            Int
+  attendanceDate      DateTime         @db.Date
+  status              AttendanceStatus
+  remarks             String?          @db.Text
+  recordedBy          String           @db.VarChar(50) // School Admin userId
+  recordedAt          DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  // Relations
+  teacher  Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+  school   School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  recorder User    @relation(fields: [recordedBy], references: [userId])
+
+  // Unique constraint: one record per teacher per date
+  @@unique([teacherId, attendanceDate])
+  @@index([teacherId])
+  @@index([schoolId])
+  @@index([attendanceDate])
+  @@index([status])
+  @@map("teacher_attendance")
+}
+
+// ============================================
+// ATTENDANCE (NEW!)
+// ============================================
+
+model Attendance {
+  attendanceId   Int              @id @default(autoincrement())
+  studentId      Int
+  classId        Int
+  schoolId       Int
+  teacherId      Int // Teacher who recorded attendance
+  attendanceDate DateTime         @db.Date
+  status         AttendanceStatus
+  remarks        String?          @db.Text
+  recordedAt     DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  // Relations
+  student Student @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  school  School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+
+  // Unique constraint: one record per student per date per class
+  @@unique([studentId, classId, attendanceDate])
+  @@index([studentId])
+  @@index([classId])
+  @@index([schoolId])
+  @@index([teacherId])
+  @@index([attendanceDate])
+  @@index([status])
+  @@map("attendance")
+}
+
+// ============================================
+// ATTENDANCE STATUS ENUM
+// ============================================
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+// ============================================
+// SIMPLE GRADES (Teacher entry)
+// ============================================
+
+enum GradeType {
+  EXAM
+  QUIZ
+  ASSIGNMENT
+}
+
+model Grade {
+  gradeId   Int       @id @default(autoincrement())
+  studentId Int
+  classId   Int
+  teacherId Int
+  subject   String    @db.VarChar(200)
+  score     Float
+  type      GradeType
+  date      DateTime  @default(now())
+  schoolId  Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  student Student @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+  school  School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([classId])
+  @@index([studentId])
+  @@index([teacherId])
+  @@index([date])
+  @@map("grades")
+}
+
+// ============================================
+// TEACHERS (NEW!)
+// ============================================
+
+model Teacher {
+  teacherId      Int      @id @default(autoincrement())
+  userId         String   @unique @db.VarChar(50)
+  schoolId       Int
+  specialization String?  @db.VarChar(100)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  user              User                @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  school            School              @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  classTeachers     ClassTeacher[]
+  homeroomClasses   Class[]             @relation("HomeroomTeacher")
+  subjectTeachers   SubjectTeacher[] // ✅ ADD THIS
+  gradeComponents   GradeComponent[]
+  studentGrades     StudentGrade[]
+  grades            Grade[]
+  attendanceRecords Attendance[]
+  teacherAttendance TeacherAttendance[]
+  timetable         Timetable[]
+  aiHomework        AiHomework[]
+
+  @@index([schoolId])
+  @@index([userId])
+  @@map("teachers")
+}
+
+// ============================================
+// CLASSES (NEW!)
+// ============================================
+
+model Class {
+  classId           Int      @id @default(autoincrement())
+  schoolId          Int
+  className         String   @db.VarChar(100) // "Grade 8-A"
+  gradeLevel        Int // 8
+  section           String?  @db.VarChar(10) // "A"
+  academicYear      String   @db.VarChar(20) // "2025/2026"
+  homeroomTeacherId Int? // Optional homeroom teacher
+  capacity          Int? // Max students
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  school          School           @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  homeroomTeacher Teacher?         @relation("HomeroomTeacher", fields: [homeroomTeacherId], references: [teacherId], onDelete: SetNull)
+  classTeachers   ClassTeacher[] // Teachers assigned to this class
+  students        Student[]
+  gradeComponents GradeComponent[]
+  studentMarks    StudentMark[]
+  studentGrades   StudentGrade[]
+  grades          Grade[]
+  attendance      Attendance[]
+  timetable       Timetable[]
+  aiHomework      AiHomework[]
+
+  @@unique([schoolId, className, academicYear])
+  @@index([schoolId])
+  @@index([homeroomTeacherId])
+  @@map("classes")
+}
+
+// ============================================
+// CLASS_TEACHERS (JUNCTION TABLE - NEW!)
+// ============================================
+
+model ClassTeacher {
+  id          Int      @id @default(autoincrement())
+  classId     Int
+  teacherId   Int
+  subjectName String?  @db.VarChar(100) // Subject they teach in this class
+  createdAt   DateTime @default(now())
+
+  // Relations
+  class   Class   @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+
+  @@unique([classId, teacherId, subjectName])
+  @@index([classId])
+  @@index([teacherId])
+  @@map("class_teachers")
+}
+
+// ============================================
+// MESSAGES (NEW!)
+// ============================================
+
+model Message {
+  messageId  Int       @id @default(autoincrement())
+  senderId   String    @db.VarChar(50)
+  receiverId String    @db.VarChar(50)
+  receiverRole UserRole?
+  schoolId   Int
+  content    String    @db.Text
+  isRead     Boolean   @default(false)
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  // Relations
+  sender   User   @relation("SentMessages", fields: [senderId], references: [userId], onDelete: Cascade)
+  receiver User   @relation("ReceivedMessages", fields: [receiverId], references: [userId], onDelete: Cascade)
+  school   School @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([receiverRole])
+  @@index([schoolId])
+  @@index([createdAt])
+  @@index([isRead])
+  @@map("messages")
+}
+
+// ============================================
+// ANNOUNCEMENTS (NEW!)
+// ============================================
+
+model Announcement {
+  announcementId Int        @id @default(autoincrement())
+  schoolId       Int
+  title          String     @db.VarChar(200)
+  message        String     @db.Text
+  targetRole     TargetRole
+  createdBy      String     @db.VarChar(50) // School Admin userId
+  expiryDate     DateTime?  @db.Date
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Relations
+  school  School @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [userId])
+
+  @@index([schoolId])
+  @@index([targetRole])
+  @@index([createdAt])
+  @@index([expiryDate])
+  @@index([isActive])
+  @@map("announcements")
+}
+
+// ============================================
+// TARGET ROLE ENUM
+// ============================================
+
+enum TargetRole {
+  ALL
+  TEACHERS
+  STUDENTS
+  PARENTS
+  SCHOOL_ADMIN
+}
+
+model Timetable {
+  timetableId  Int       @id @default(autoincrement())
+  schoolId     Int
+  classId      Int
+  subjectId    Int
+  teacherId    Int
+  dayOfWeek    DayOfWeek
+  periodNumber Int
+  startTime    String    @db.VarChar(10)
+  endTime      String    @db.VarChar(10)
+  roomNumber   String?   @db.VarChar(50)
+  academicYear String    @db.VarChar(20)
+  isActive     Boolean   @default(true)
+  createdBy    String    @db.VarChar(50)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  school  School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [subjectId], onDelete: Cascade)
+  teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+  creator User    @relation(fields: [createdBy], references: [userId])
+
+  @@unique([schoolId, classId, dayOfWeek, periodNumber, academicYear])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([teacherId])
+  @@map("timetable")
+}
+
+// ============================================
+// PERIOD CONFIGURATION (NEW!)
+// ============================================
+
+model PeriodConfiguration {
+  configId     Int      @id @default(autoincrement())
+  schoolId     Int
+  periodNumber Int // 1-7
+  periodName   String   @db.VarChar(50) // "P1", "P2", etc.
+  startTime    String   @db.VarChar(10)
+  endTime      String   @db.VarChar(10)
+  academicYear String   @db.VarChar(20)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@unique([schoolId, periodNumber, academicYear])
+  @@map("period_configuration")
+}
+
+// ============================================
+// BREAK CONFIGURATION (NEW!)
+// ============================================
+
+model BreakConfiguration {
+  breakId      Int      @id @default(autoincrement())
+  schoolId     Int
+  breakName    String   @db.VarChar(50) // "Break", "Lunch"
+  afterPeriod  Int // Break comes after this period number
+  startTime    String   @db.VarChar(10)
+  endTime      String   @db.VarChar(10)
+  academicYear String   @db.VarChar(20)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@unique([schoolId, breakName, academicYear])
+  @@map("break_configuration")
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ============================================
+// AI CHAT HISTORY (FEATURE 1)
+// ============================================
+
+model AiChatHistory {
+  chatId     Int      @id @default(autoincrement())
+  userId     String   @db.VarChar(50)
+  schoolId   Int
+  question   String   @db.Text
+  aiResponse String   @db.Text
+  subject    String?  @db.VarChar(100)
+  language   String   @default("English") @db.VarChar(20) // English or Amharic
+  sessionId  String?  @db.VarChar(100) // Group related questions
+  tokens     Int? // Token usage tracking
+  createdAt  DateTime @default(now())
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  school School @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([schoolId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("ai_chat_history")
+}
+
+// ============================================
+// AI HOMEWORK (FEATURE 2)
+// ============================================
+
+model AiHomework {
+  homeworkId         Int             @id @default(autoincrement())
+  teacherId          Int
+  schoolId           Int
+  classId            Int?
+  subjectId          Int?
+  topic              String          @db.VarChar(200)
+  // Stored subject label for UI rendering (when subjectId is not provided).
+  subjectName        String?         @db.VarChar(200)
+  gradeLevel         Int
+  difficulty         DifficultyLevel
+  numberOfQuestions  Int             @default(5)
+  generatedQuestions Json // Array of questions
+  answerKey          Json // Array of answers
+  instructions       String?         @db.Text
+  isPublished        Boolean         @default(false)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  // Relations
+  teacher Teacher  @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+  school  School   @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class   Class?   @relation(fields: [classId], references: [classId], onDelete: SetNull)
+  subject Subject? @relation(fields: [subjectId], references: [subjectId], onDelete: SetNull)
+  submissions AiHomeworkSubmission[]
+
+  @@index([teacherId])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([createdAt])
+  @@map("ai_homework")
+}
+
+enum HomeworkSubmissionStatus {
+  DRAFT
+  SUBMITTED
+}
+
+model AiHomeworkSubmission {
+  submissionId Int                      @id @default(autoincrement())
+  homeworkId   Int
+  studentId    Int
+  schoolId     Int
+  answers      Json                     @default("{}")
+  status       HomeworkSubmissionStatus @default(DRAFT)
+  submittedAt  DateTime?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  homework AiHomework @relation(fields: [homeworkId], references: [homeworkId], onDelete: Cascade)
+  student  Student    @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+  school   School     @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@unique([homeworkId, studentId])
+  @@index([homeworkId])
+  @@index([studentId])
+  @@index([schoolId])
+  @@index([status])
+  @@map("ai_homework_submissions")
+}
+
+// ============================================
+// AI ANALYTICS CACHE (FEATURE 3)
+// ============================================
+
+model AiAnalyticsCache {
+  cacheId      Int      @id @default(autoincrement())
+  schoolId     Int
+  analysisType String   @db.VarChar(50) // performance, attendance, risk
+  classId      Int?
+  studentId    Int?
+  academicYear String   @db.VarChar(20)
+  insights     Json // AI-generated insights
+  data         Json // Source data
+  generatedAt  DateTime @default(now())
+  expiresAt    DateTime // Cache expiration
+
+  school School @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([analysisType])
+  @@index([expiresAt])
+  @@map("ai_analytics_cache")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum DifficultyLevel {
+  EASY
+  MEDIUM
+  HARD
+  ADVANCED
+}

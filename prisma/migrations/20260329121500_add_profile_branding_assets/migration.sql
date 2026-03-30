@@ -1,0 +1,5 @@
+ALTER TABLE `users`
+  ADD COLUMN `profileImage` VARCHAR(500) NULL;
+
+ALTER TABLE `schools`
+  ADD COLUMN `logo` VARCHAR(500) NULL;

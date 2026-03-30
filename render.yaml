@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: saas-backend
+    env: node
+    plan: free
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 5000
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRY
+        value: 1d
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: gemini-2.5-flash
+      - key: AI_MAX_TOKENS
+        value: 2048
+      - key: AI_TEMPERATURE
+        value: 0.7
+      - key: AI_RATE_LIMIT_PER_MINUTE
+        value: 10
