@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     rootDir: .
-    buildCommand: npm install
+    buildCommand: npm install --include=dev && npx prisma generate
     startCommand: npm start
     autoDeploy: true
     envVars:
