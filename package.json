@@ -10,9 +10,6 @@
     "postinstall": "prisma generate",
     "seed": "node prisma/seed.js"
   },
-  "prisma": {
-    "seed": "node prisma/seed.js"
-  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -28,7 +25,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-    "mysql2": "^3.18.2"
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",
