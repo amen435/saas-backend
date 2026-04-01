@@ -290,9 +290,10 @@ async function main() {
 
     const sampleClass = await prisma.class.upsert({
       where: {
-        schoolId_className_academicYear: {
+        schoolId_gradeLevel_section_academicYear: {
           schoolId: createdSchools[0].schoolId,
-          className: 'Grade 8-A',
+          gradeLevel: 8,
+          section: 'A',
           academicYear: '2025/2026'
         }
       },

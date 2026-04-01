@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const { Prisma } = require('@prisma/client');
 
 const withAssetUrl = (req, value) => {
   if (!value) return null;
@@ -10,17 +11,15 @@ const withAssetUrl = (req, value) => {
 
 const hasColumn = async (tableName, columnName) => {
   try {
-    const rows = await prisma.$queryRawUnsafe(
-      `
-        SELECT COLUMN_NAME
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = ?
-          AND COLUMN_NAME = ?
+    const rows = await prisma.$queryRaw(
+      Prisma.sql`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = ${tableName}
+          AND column_name = ${columnName}
         LIMIT 1
-      `,
-      tableName,
-      columnName
+      `
     );
 
     return Array.isArray(rows) && rows.length > 0;
@@ -37,7 +36,7 @@ const getUserProfileImage = async (userId) => {
   }
 
   const rows = await prisma.$queryRawUnsafe(
-    'SELECT profileImage FROM users WHERE userId = ? LIMIT 1',
+    'SELECT "profileImage" FROM users WHERE "userId" = $1 LIMIT 1',
     String(userId)
   );
 
@@ -51,7 +50,7 @@ const setUserProfileImage = async (userId, profileImage) => {
   }
 
   await prisma.$executeRawUnsafe(
-    'UPDATE users SET profileImage = ?, updatedAt = NOW() WHERE userId = ?',
+    'UPDATE users SET "profileImage" = $1, "updatedAt" = NOW() WHERE "userId" = $2',
     profileImage,
     String(userId)
   );
@@ -66,7 +65,7 @@ const getSchoolLogo = async (schoolId) => {
   }
 
   const rows = await prisma.$queryRawUnsafe(
-    'SELECT logo FROM schools WHERE schoolId = ? LIMIT 1',
+    'SELECT logo FROM schools WHERE "schoolId" = $1 LIMIT 1',
     Number(schoolId)
   );
 
@@ -80,7 +79,7 @@ const setSchoolLogo = async (schoolId, logo) => {
   }
 
   await prisma.$executeRawUnsafe(
-    'UPDATE schools SET logo = ?, updatedAt = NOW() WHERE schoolId = ?',
+    'UPDATE schools SET logo = $1, "updatedAt" = NOW() WHERE "schoolId" = $2',
     logo,
     Number(schoolId)
   );
