@@ -38,8 +38,15 @@ const aiAnalyticsRoutes = require('./ai/routes/aiAnalytics.routes');
 
 const app = express();
 const uploadsDir = path.join(__dirname, '..', 'uploads');
+const isProduction = (process.env.NODE_ENV || 'development') === 'production';
 
 fs.mkdirSync(uploadsDir, { recursive: true });
+
+// Render and other managed platforms sit behind a reverse proxy, so Express
+// needs to trust forwarded headers for rate limiting and client IP detection.
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
 
 app.use(
   helmet({
@@ -65,7 +72,6 @@ const allowedOriginsFromEnv = normalizeOrigin(process.env.FRONTEND_URL)
   .map((o) => normalizeOrigin(o))
   .filter(Boolean);
 
-const isProduction = (process.env.NODE_ENV || 'development') === 'production';
 const allowedOrigins = isProduction
   ? (allowedOriginsFromEnv.length > 0 ? allowedOriginsFromEnv : DEFAULT_ALLOWED_ORIGINS)
   : Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...allowedOriginsFromEnv]));
