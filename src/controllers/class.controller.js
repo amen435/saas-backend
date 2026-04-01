@@ -68,7 +68,11 @@ const createClass = async (req, res) => {
           include: {
             user: {
               select: {
-                fullName: true
+                userId: true,
+                fullName: true,
+                phone: true,
+                role: true,
+                isActive: true,
               }
             }
           }
@@ -86,7 +90,7 @@ const createClass = async (req, res) => {
     if (error.code === 'P2002') {
       return res.status(409).json({
         success: false,
-        error: 'Class already exists for this academic year'
+        error: 'This grade and section already exist for this academic year'
       });
     }
 
@@ -129,7 +133,11 @@ const getAllClasses = async (req, res) => {
           include: {
             user: {
               select: {
-                fullName: true
+                userId: true,
+                fullName: true,
+                phone: true,
+                role: true,
+                isActive: true,
               }
             }
           }

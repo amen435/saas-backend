@@ -1,10 +1,23 @@
 // src/utils/seedPeriodConfig.js
 
-async function seedPeriodConfigurations(prisma, schoolId, academicYear) {
+function validateSeedInputs(prisma, schoolId, academicYear) {
   if (!prisma) {
     throw new Error('seedPeriodConfigurations: prisma client is required');
   }
-  // Period configurations based on your frontend
+
+  if (!Number.isInteger(Number(schoolId)) || Number(schoolId) <= 0) {
+    throw new Error('seedPeriodConfigurations: valid schoolId is required');
+  }
+
+  if (!academicYear || typeof academicYear !== 'string') {
+    throw new Error('seedPeriodConfigurations: valid academicYear is required');
+  }
+}
+
+async function seedPeriodConfigurations(prisma, schoolId, academicYear) {
+  validateSeedInputs(prisma, schoolId, academicYear);
+
+  const normalizedSchoolId = Number(schoolId);
   const periods = [
     { periodNumber: 1, periodName: 'P1', startTime: '08:00', endTime: '08:55' },
     { periodNumber: 2, periodName: 'P2', startTime: '08:55', endTime: '09:50' },
@@ -19,21 +32,20 @@ async function seedPeriodConfigurations(prisma, schoolId, academicYear) {
     await prisma.periodConfiguration.upsert({
       where: {
         schoolId_periodNumber_academicYear: {
-          schoolId,
+          schoolId: normalizedSchoolId,
           periodNumber: period.periodNumber,
           academicYear,
         },
       },
       update: period,
       create: {
-        schoolId,
+        schoolId: normalizedSchoolId,
         ...period,
         academicYear,
       },
     });
   }
 
-  // Break configurations
   const breaks = [
     { breakName: 'Break', afterPeriod: 3, startTime: '10:25', endTime: '10:55' },
     { breakName: 'Lunch', afterPeriod: 5, startTime: '12:30', endTime: '13:00' },
@@ -43,21 +55,44 @@ async function seedPeriodConfigurations(prisma, schoolId, academicYear) {
     await prisma.breakConfiguration.upsert({
       where: {
         schoolId_breakName_academicYear: {
-          schoolId,
+          schoolId: normalizedSchoolId,
           breakName: breakItem.breakName,
           academicYear,
         },
       },
       update: breakItem,
       create: {
-        schoolId,
+        schoolId: normalizedSchoolId,
         ...breakItem,
         academicYear,
       },
     });
   }
 
-  console.log(`✅ Period and break configurations seeded for school ${schoolId}`);
+  console.log(`Period and break configurations seeded for school ${normalizedSchoolId}`);
 }
 
-module.exports = { seedPeriodConfigurations };
+async function ensurePeriodConfigurations(prisma, schoolId, academicYear) {
+  validateSeedInputs(prisma, schoolId, academicYear);
+
+  const normalizedSchoolId = Number(schoolId);
+  const existingCount = await prisma.periodConfiguration.count({
+    where: {
+      schoolId: normalizedSchoolId,
+      academicYear,
+      isActive: true,
+    },
+  });
+
+  if (existingCount > 0) {
+    return false;
+  }
+
+  await seedPeriodConfigurations(prisma, normalizedSchoolId, academicYear);
+  return true;
+}
+
+module.exports = {
+  seedPeriodConfigurations,
+  ensurePeriodConfigurations,
+};

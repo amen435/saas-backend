@@ -1,8 +1,13 @@
 // src/services/timetable.service.js
 
 const prisma = require('../config/database');
+const { ensurePeriodConfigurations } = require('../utils/seedPeriodConfig');
 
 class TimetableService {
+  async ensurePeriodConfigForYear(schoolId, academicYear) {
+    await ensurePeriodConfigurations(prisma, schoolId, academicYear);
+  }
+
   /**
    * Check for conflicts before creating/updating timetable
    */
@@ -52,6 +57,8 @@ class TimetableService {
    * Create timetable entry
    */
   async createTimetable(data, schoolId, createdBy) {
+    await this.ensurePeriodConfigForYear(schoolId, data.academicYear);
+
     // Verify class, subject, and teacher belong to the school
     const [classData, subject, teacher] = await Promise.all([
       prisma.class.findFirst({
@@ -137,6 +144,8 @@ class TimetableService {
    * Get timetable by class (formatted for frontend grid)
    */
   async getTimetableByClass(classId, schoolId, academicYear) {
+    await this.ensurePeriodConfigForYear(schoolId, academicYear);
+
     // Get period configurations
     const periods = await prisma.periodConfiguration.findMany({
       where: { schoolId, academicYear, isActive: true },
@@ -241,6 +250,8 @@ class TimetableService {
    * Get timetable by teacher (formatted for frontend grid)
    */
   async getTimetableByTeacher(teacherId, schoolId, academicYear) {
+    await this.ensurePeriodConfigForYear(schoolId, academicYear);
+
     const periods = await prisma.periodConfiguration.findMany({
       where: { schoolId, academicYear, isActive: true },
       orderBy: { periodNumber: 'asc' },
@@ -348,6 +359,7 @@ class TimetableService {
     });
 
     if (!existing) throw new Error('Timetable entry not found');
+    await this.ensurePeriodConfigForYear(schoolId, data.academicYear || existing.academicYear);
 
     // If period changed, get new period config
     let startTime = existing.startTime;
@@ -437,6 +449,8 @@ class TimetableService {
    * Get period configurations
    */
   async getPeriodConfigurations(schoolId, academicYear) {
+    await this.ensurePeriodConfigForYear(schoolId, academicYear);
+
     const periods = await prisma.periodConfiguration.findMany({
       where: { schoolId, academicYear, isActive: true },
       orderBy: { periodNumber: 'asc' },

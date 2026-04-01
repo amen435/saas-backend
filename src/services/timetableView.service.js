@@ -1,13 +1,20 @@
 // src/services/timetableView.service.js
 
 const prisma = require('../config/database');
+const { ensurePeriodConfigurations } = require('../utils/seedPeriodConfig');
 
 class TimetableViewService {
+  async ensurePeriodConfigForYear(schoolId, academicYear) {
+    await ensurePeriodConfigurations(prisma, schoolId, academicYear);
+  }
+
   /**
    * Get timetable for a specific class
    * Used by: Students, Parents (for their child's class)
    */
   async getClassTimetable(classId, schoolId, academicYear) {
+    await this.ensurePeriodConfigForYear(schoolId, academicYear);
+
     // Verify class belongs to school
     const classData = await prisma.class.findFirst({
       where: { classId, schoolId },
@@ -104,6 +111,8 @@ class TimetableViewService {
    * Shows all classes the teacher teaches
    */
   async getTeacherTimetable(teacherId, schoolId, academicYear) {
+    await this.ensurePeriodConfigForYear(schoolId, academicYear);
+
     // Verify teacher belongs to school
     const teacher = await prisma.teacher.findFirst({
       where: { teacherId, schoolId },

@@ -522,7 +522,7 @@ model Class {
   timetable       Timetable[]
   aiHomework      AiHomework[]
 
-  @@unique([schoolId, className, academicYear])
+  @@unique([schoolId, gradeLevel, section, academicYear])
   @@index([schoolId])
   @@index([homeroomTeacherId])
   @@map("classes")
