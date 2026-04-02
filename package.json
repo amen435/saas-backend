@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test tests/**/*.test.js",
     "start": "node server.js",
-    "start:render": "npx prisma migrate deploy && node server.js",
+    "start:render": "node scripts/start-render.cjs",
     "dev": "nodemon server.js",
     "postinstall": "prisma generate",
     "seed": "node prisma/seed.js",
