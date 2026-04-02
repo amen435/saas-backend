@@ -7,6 +7,10 @@ const { seedPeriodConfigurations } = require('../src/utils/seedPeriodConfig');
 const prisma = new PrismaClient();
 
 async function main() {
+  if ((process.env.NODE_ENV || 'development') === 'production' && process.env.ALLOW_SEED_DEMO_DATA !== 'true') {
+    throw new Error('Seeding demo credentials in production is disabled. Set ALLOW_SEED_DEMO_DATA=true only for a deliberate one-time bootstrap.');
+  }
+
   console.log('🌱 Starting database seeding...\n');
 
   try {
@@ -15,7 +19,8 @@ async function main() {
     // ============================================
     console.log('👤 Creating Super Admin...');
     
-    const superAdminPassword = await bcrypt.hash('SuperAdmin@123', 10);
+    const superAdminPlaintext = process.env.SEED_SUPER_ADMIN_PASSWORD || 'ChangeMe-SuperAdmin!123';
+    const superAdminPassword = await bcrypt.hash(superAdminPlaintext, 10);
     
     const superAdmin = await prisma.user.upsert({
       where: { userId: 'SA001' },
@@ -180,7 +185,8 @@ async function main() {
       },
     ];
 
-    const adminPassword = await bcrypt.hash('Admin@123', 10);
+    const adminPlaintext = process.env.SEED_SCHOOL_ADMIN_PASSWORD || 'ChangeMe-SchoolAdmin!123';
+    const adminPassword = await bcrypt.hash(adminPlaintext, 10);
 
     for (const adminData of schoolAdmins) {
       const school = createdSchools.find(s => s.schoolCode === adminData.schoolCode);
@@ -212,7 +218,8 @@ async function main() {
     // ============================================
     console.log('👨‍🏫 Creating Homeroom Teacher...\n');
 
-    const homeroomPassword = await bcrypt.hash('Homeroom@123', 10);
+    const homeroomPlaintext = process.env.SEED_HOMEROOM_PASSWORD || 'ChangeMe-Homeroom!123';
+    const homeroomPassword = await bcrypt.hash(homeroomPlaintext, 10);
 
     const homeroomUser = await prisma.user.upsert({
       where: { userId: 'boleHT001' },
@@ -250,7 +257,8 @@ async function main() {
     // ============================================
     console.log('👨‍🏫 Creating Regular Teacher...\n');
 
-    const teacherPassword = await bcrypt.hash('Teacher@123', 10);
+    const teacherPlaintext = process.env.SEED_TEACHER_PASSWORD || 'ChangeMe-Teacher!123';
+    const teacherPassword = await bcrypt.hash(teacherPlaintext, 10);
 
     const teacherUser = await prisma.user.upsert({
       where: { userId: 'boleTC001' },
@@ -439,23 +447,8 @@ async function main() {
     console.log('🎉 SEEDING COMPLETED SUCCESSFULLY!');
     console.log('════════════════════════════════════════\n');
     
-    console.log('📋 LOGIN CREDENTIALS:\n');
-    
-    console.log('1️⃣  SUPER ADMIN:');
-    console.log('    username: superadmin');
-    console.log('    password: SuperAdmin@123\n');
-    
-    console.log('2️⃣  SCHOOL ADMIN (Bole):');
-    console.log('    username: admin.bole');
-    console.log('    password: Admin@123\n');
-    
-    console.log('3️⃣  HOMEROOM TEACHER:');
-    console.log('    username: homeroom.tigist');
-    console.log('    password: Homeroom@123\n');
-    
-    console.log('4️⃣  REGULAR TEACHER:');
-    console.log('    username: teacher.ahmed');
-    console.log('    password: Teacher@123\n');
+    console.log('🔐 Demo accounts were seeded.');
+    console.log('Provide explicit SEED_*_PASSWORD values before running this script outside local development.\n');
     
     console.log('📚 SUBJECTS CREATED: ' + createdSubjects.length);
     createdSubjects.forEach((subject, index) => {

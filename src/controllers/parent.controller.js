@@ -2,6 +2,7 @@
 
 const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 /**
  * @route   POST /api/homeroom/classes/:classId/parents
@@ -45,10 +46,11 @@ const createParent = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 8 characters'
+        error: passwordError
       });
     }
 
@@ -692,8 +694,6 @@ const getMyChildren = async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
 
-    console.log("[getMyChildren] request:", { userId, schoolId });
-
     const parent = await prisma.parent.findFirst({
       where: { userId, schoolId },
       select: { parentId: true },
@@ -747,8 +747,6 @@ const getMyChildren = async (req, res) => {
         };
       })
       .filter(Boolean);
-
-    console.log("[getMyChildren] response:", { childrenCount: children.length });
 
     return res.status(200).json({
       success: true,

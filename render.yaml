@@ -16,10 +16,14 @@ services:
         value: 5000
       - key: FRONTEND_URL
         sync: false
+      - key: APP_BASE_URL
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: COOKIE_SAME_SITE
+        value: None
       - key: JWT_EXPIRY
         value: 1d
       - key: GEMINI_API_KEY

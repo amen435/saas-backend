@@ -1,7 +1,14 @@
 // src/middleware/auth.middleware.js
 
 const jwt = require('jsonwebtoken');
+const prisma = require('../config/database');
 const { getAvailableRolesForUser } = require('../utils/role.utils');
+const {
+  AUTH_COOKIE_NAME,
+  CSRF_COOKIE_NAME,
+  CSRF_HEADER_NAME,
+  parseCookies,
+} = require('../utils/security.utils');
 
 /**
  * Authenticate JWT Token
@@ -10,11 +17,10 @@ const { getAvailableRolesForUser } = require('../utils/role.utils');
  */
 const authenticateToken = async (req, res, next) => {
   try {
-    // ============================================
-    // 1. GET TOKEN FROM HEADER
-    // ============================================
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const bearerToken = authHeader && authHeader.split(' ')[1];
+    const cookies = parseCookies(req.headers.cookie || '');
+    const token = bearerToken || cookies[AUTH_COOKIE_NAME];
 
     if (!token) {
       return res.status(401).json({
@@ -23,22 +29,34 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // ============================================
-    // 2. VERIFY TOKEN
-    // ============================================
     const decoded = jwt.verify(token, process.env.JWT_SECRET, {
       issuer: 'intelligeschool-api',
       audience: 'intelligeschool-client'
     });
 
-    // ============================================
-    // 3. ATTACH USER DATA TO REQUEST
-    // ============================================
+    const user = await prisma.user.findUnique({
+      where: { userId: String(decoded.userId) },
+      select: {
+        userId: true,
+        role: true,
+        schoolId: true,
+        classId: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        success: false,
+        error: 'Session is no longer valid.'
+      });
+    }
+
     req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
-      schoolId: decoded.schoolId,
-      classId: decoded.classId
+      userId: user.userId,
+      role: user.role,
+      schoolId: user.schoolId,
+      classId: user.classId
     };
 
     // ============================================
@@ -101,59 +119,30 @@ const authenticateToken = async (req, res, next) => {
  * Optional: Verify token and fetch fresh user data from database
  */
 const authenticateTokenWithDB = async (req, res, next) => {
-  try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+  return authenticateToken(req, res, next);
+};
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'Access denied. No token provided.'
-      });
-    }
+const requireCsrfProtection = (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
 
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  const cookies = parseCookies(req.headers.cookie || '');
+  const cookieToken = cookies[CSRF_COOKIE_NAME];
+  const headerToken = req.headers[CSRF_HEADER_NAME];
 
-    // Fetch fresh user data from database
-    const prisma = require('../config/database');
-    const user = await prisma.user.findUnique({
-      where: { userId: decoded.userId },
-      select: {
-        userId: true,
-        role: true,
-        schoolId: true,
-        classId: true,
-        isActive: true
-      }
-    });
-
-    if (!user || !user.isActive) {
-      return res.status(403).json({
-        success: false,
-        error: 'User not found or inactive.'
-      });
-    }
-
-    req.user = user;
-    next();
-
-  } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        error: 'Token expired. Please login again.'
-      });
-    }
-
+  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
     return res.status(403).json({
       success: false,
-      error: 'Invalid token.'
+      error: 'Invalid CSRF token.'
     });
   }
+
+  return next();
 };
 
 module.exports = {
   authenticateToken,
-  authenticateTokenWithDB
+  authenticateTokenWithDB,
+  requireCsrfProtection
 };

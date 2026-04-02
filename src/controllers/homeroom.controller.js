@@ -2,6 +2,7 @@
 
 const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 /**
  * @route   GET /api/homeroom/my-homeroom-classes
@@ -121,10 +122,11 @@ const createStudent = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    const studentPasswordError = validatePasswordStrength(password);
+    if (studentPasswordError) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 8 characters'
+        error: studentPasswordError
       });
     }
 
@@ -147,10 +149,11 @@ const createStudent = async (req, res) => {
           error: 'parent.password is required'
         });
       }
-      if (parentPassword.length < 8) {
+      const parentPasswordError = validatePasswordStrength(parentPassword);
+      if (parentPasswordError) {
         return res.status(400).json({
           success: false,
-          error: 'parent.password must be at least 8 characters'
+          error: parentPasswordError
         });
       }
     }
@@ -162,14 +165,6 @@ const createStudent = async (req, res) => {
         error: 'parent.phoneNumber is required'
       });
     }
-
-    // Debug logging (sanitised: never log raw passwords).
-    const debugBody = JSON.parse(JSON.stringify(req.body || {}));
-    if (debugBody?.student?.password) debugBody.student.password = '***';
-    if (debugBody?.parent?.password) debugBody.parent.password = '***';
-    if (debugBody?.password) debugBody.password = '***';
-    // eslint-disable-next-line no-console
-    console.log('[createStudent] request body:', debugBody);
 
     let parentCreated = false;
     let createdOrReusedParent = null;
@@ -483,11 +478,6 @@ const createStudent = async (req, res) => {
       createdOrReusedParent = parentRecord;
       return { student, parent: parentRecord };
     });
-
-    // eslint-disable-next-line no-console
-    console.log('[createStudent] parent status:', { parentCreated });
-    // eslint-disable-next-line no-console
-    console.log('[createStudent] linking result:', linkingResult);
 
     res.status(201).json({
       success: true,

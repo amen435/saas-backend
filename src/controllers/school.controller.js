@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
 const { getSchoolLogo, setSchoolLogo, withAssetUrl } = require('../utils/branding.utils');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 const canAccessSchool = (req, schoolId) => {
   const effectiveRole = req.user?.activeRole || req.user?.role;
@@ -63,18 +64,11 @@ const createSchool = async (req, res) => {
       adminFullName;
 
     if (createAdmin) {
-      if (adminPassword.length < 8) {
+      const passwordError = validatePasswordStrength(adminPassword);
+      if (passwordError) {
         return res.status(400).json({
           success: false,
-          error: 'Admin password must be at least 8 characters long',
-        });
-      }
-
-      const passwordRegex = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9])/;
-      if (!passwordRegex.test(adminPassword)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Admin password must contain at least one uppercase letter, one number, and one special character',
+          error: passwordError,
         });
       }
 

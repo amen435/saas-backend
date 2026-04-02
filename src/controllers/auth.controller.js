@@ -4,6 +4,34 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/database');
 const { getAvailableRolesForUser } = require('../utils/role.utils');
+const {
+  AUTH_COOKIE_NAME,
+  CSRF_COOKIE_NAME,
+  serializeCookie,
+  getCookieOptions,
+  generateCsrfToken,
+} = require('../utils/security.utils');
+
+const buildUserPayload = async (user) => {
+  const roles = await getAvailableRolesForUser({
+    userId: user.userId,
+    role: user.role,
+    schoolId: user.schoolId,
+  });
+
+  return {
+    userId: user.userId,
+    username: user.username,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    schoolId: user.schoolId,
+    schoolCode: user.school?.schoolCode || null,
+    schoolName: user.school?.schoolName || null,
+    classId: user.classId,
+    roles,
+  };
+};
 
 /**
  * @route   POST /api/auth/login
@@ -181,6 +209,13 @@ const login = async (req, res) => {
       }
     );
 
+    const csrfToken = generateCsrfToken();
+    const cookieOptions = getCookieOptions();
+    res.setHeader('Set-Cookie', [
+      serializeCookie(AUTH_COOKIE_NAME, token, cookieOptions.auth),
+      serializeCookie(CSRF_COOKIE_NAME, csrfToken, cookieOptions.csrf),
+    ]);
+
     // ============================================
     // 11. RETURN SUCCESS RESPONSE
     // ============================================
@@ -188,7 +223,6 @@ const login = async (req, res) => {
       success: true,
       message: 'Login successful',
       data: {
-        token,
         user: {
           userId: user.userId,
           username: user.username,
@@ -220,17 +254,32 @@ const login = async (req, res) => {
  */
 const verifyToken = async (req, res) => {
   try {
-    // Token already verified by auth middleware
-    // req.user contains decoded token data
-    
+    const user = await prisma.user.findUnique({
+      where: { userId: String(req.user.userId) },
+      include: {
+        school: {
+          select: {
+            schoolCode: true,
+            schoolName: true,
+          },
+        },
+      },
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        success: false,
+        error: 'Session is no longer valid',
+      });
+    }
+
+    const payload = await buildUserPayload(user);
+
     res.status(200).json({
       success: true,
       message: 'Token is valid',
       data: {
-        userId: req.user.userId,
-        role: req.user.role,
-        schoolId: req.user.schoolId,
-        classId: req.user.classId
+        user: payload,
       }
     });
   } catch (error) {
@@ -249,8 +298,11 @@ const verifyToken = async (req, res) => {
  */
 const logout = async (req, res) => {
   try {
-    // In stateless JWT, logout is handled client-side
-    // Optional: Implement token blacklist here if needed
+    const cookieOptions = getCookieOptions();
+    res.setHeader('Set-Cookie', [
+      serializeCookie(AUTH_COOKIE_NAME, '', { ...cookieOptions.auth, maxAge: 0 }),
+      serializeCookie(CSRF_COOKIE_NAME, '', { ...cookieOptions.csrf, maxAge: 0 }),
+    ]);
     
     res.status(200).json({
       success: true,

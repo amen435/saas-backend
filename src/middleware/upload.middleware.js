@@ -2,6 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 
+const ALLOWED_IMAGE_TYPES = new Map([
+  ['image/jpeg', ['.jpg', '.jpeg']],
+  ['image/png', ['.png']],
+  ['image/webp', ['.webp']],
+]);
+
 const ensureUploadDir = (relativeDir) => {
   const targetDir = path.join(__dirname, '..', '..', 'uploads', relativeDir);
   fs.mkdirSync(targetDir, { recursive: true });
@@ -21,8 +27,12 @@ const createStorage = (relativeDir, filePrefix) =>
   });
 
 const imageFileFilter = (req, file, cb) => {
-  if (!file?.mimetype?.startsWith('image/')) {
-    return cb(new Error('Only image uploads are allowed.'));
+  const mimeType = String(file?.mimetype || '').toLowerCase();
+  const extension = path.extname(file?.originalname || '').toLowerCase();
+  const allowedExtensions = ALLOWED_IMAGE_TYPES.get(mimeType);
+
+  if (!allowedExtensions || !allowedExtensions.includes(extension)) {
+    return cb(new Error('Only JPG, PNG, and WebP image uploads are allowed.'));
   }
 
   cb(null, true);

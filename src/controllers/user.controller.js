@@ -3,6 +3,7 @@
 const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
 const { getAvailableRolesForUser } = require('../utils/role.utils');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 /**
  * @route   POST /api/users/school-admins
@@ -33,20 +34,11 @@ const createSchoolAdmin = async (req, res) => {
       });
     }
 
-    // Password strength validation
-    if (password.length < 8) {
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 8 characters long'
-      });
-    }
-
-    // Validate password complexity
-    const passwordRegex = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9])/;
-    if (!passwordRegex.test(password)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Password must contain at least one uppercase letter, one number, and one special character'
+        error: passwordError
       });
     }
 

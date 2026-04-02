@@ -2,6 +2,7 @@
 
 const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 /**
  * @route   POST /api/students
@@ -39,11 +40,11 @@ const createStudent = async (req, res) => {
       });
     }
 
-    // Password validation
-    if (password.length < 8) {
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 8 characters'
+        error: passwordError
       });
     }
 

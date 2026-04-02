@@ -7,6 +7,7 @@ const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireAdmin } = require('../middleware/rbac.middleware');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 router.use(authenticateToken);
 router.use(requireAdmin);
@@ -52,10 +53,11 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    const studentPasswordError = validatePasswordStrength(password);
+    if (studentPasswordError) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 8 characters',
+        error: studentPasswordError,
       });
     }
 
@@ -74,10 +76,11 @@ router.post('/', async (req, res) => {
           error: 'parent.password is required',
         });
       }
-      if (parentPassword.length < 8) {
+      const parentPasswordError = validatePasswordStrength(parentPassword);
+      if (parentPasswordError) {
         return res.status(400).json({
           success: false,
-          error: 'parent.password must be at least 8 characters',
+          error: parentPasswordError,
         });
       }
     }
