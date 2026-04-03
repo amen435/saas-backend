@@ -1,6 +1,9 @@
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const prismaSchema = 'prisma/schema.prisma';
+const prismaMigrationsDir = path.join(process.cwd(), 'prisma', 'migrations');
 
 const run = (command, args, options = {}) =>
   new Promise((resolve) => {
@@ -19,6 +22,13 @@ const run = (command, args, options = {}) =>
   });
 
 const requiredEnv = ['DATABASE_URL', 'JWT_SECRET'];
+
+const getMigrationDirectories = () =>
+  fs
+    .readdirSync(prismaMigrationsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 
 const logEnvStatus = () => {
   const summary = {
@@ -58,13 +68,52 @@ const runMigrations = async () => {
   console.error('Prisma migrate deploy failed.');
   console.error('Common causes: invalid DATABASE_URL, missing DB permissions, or a failing migration.');
 
+  if (String(process.env.ALLOW_PRISMA_BASELINE || '').toLowerCase() === 'true') {
+    console.warn('ALLOW_PRISMA_BASELINE=true detected. Attempting one-time baseline for an existing non-empty database.');
+    const migrations = getMigrationDirectories();
+
+    for (const migration of migrations) {
+      console.log(`Marking migration as applied: ${migration}`);
+      const resolveCode = await run('npx', [
+        'prisma',
+        'migrate',
+        'resolve',
+        '--applied',
+        migration,
+        `--schema=${prismaSchema}`,
+      ]);
+
+      if (resolveCode !== 0) {
+        console.error(`Failed while baselining migration ${migration}.`);
+        return false;
+      }
+    }
+
+    console.log('Baseline complete. Re-running prisma migrate deploy...');
+    const deployAfterBaselineCode = await run('npx', [
+      'prisma',
+      'migrate',
+      'deploy',
+      `--schema=${prismaSchema}`,
+    ]);
+
+    if (deployAfterBaselineCode === 0) {
+      return true;
+    }
+
+    console.error('Prisma migrate deploy still failed after baselining.');
+    return false;
+  }
+
   if (String(process.env.ALLOW_PRISMA_DB_PUSH || '').toLowerCase() === 'true') {
     console.warn('ALLOW_PRISMA_DB_PUSH=true detected. Running explicit fallback: prisma db push --skip-generate');
     const pushCode = await run('npx', ['prisma', 'db', 'push', '--skip-generate', `--schema=${prismaSchema}`]);
     return pushCode === 0;
   }
 
-  console.error('Refusing unsafe fallback. Set ALLOW_PRISMA_DB_PUSH=true only for a temporary staging recovery if you explicitly accept the risk.');
+  console.error(
+    'Refusing fallback. Set ALLOW_PRISMA_BASELINE=true for a one-time baseline of an existing DB, or ALLOW_PRISMA_DB_PUSH=true only for a temporary staging recovery if you explicitly accept the risk.'
+  );
   return false;
 };
 
