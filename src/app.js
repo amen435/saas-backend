@@ -52,6 +52,29 @@ const normalizeOrigin = (value) =>
     .trim()
     .replace(/^["']|["']$/g, '');
 
+/** Browser Origin header is scheme + host (no path); FRONTEND_URL may wrongly include a trailing slash. */
+const canonicalOrigin = (value) => {
+  const raw = normalizeOrigin(value);
+  if (!raw || raw === 'null') return '';
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}`.toLowerCase();
+  } catch {
+    return raw.replace(/\/+$/, '').toLowerCase();
+  }
+};
+
+const isPublicVercelAppOrigin = (origin) => {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    return host === 'vercel.app' || host.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+};
+
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8080',
   'http://127.0.0.1:8080',
@@ -65,15 +88,21 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 const allowedOriginsFromEnv = normalizeOrigin(process.env.FRONTEND_URL)
   .split(',')
-  .map((origin) => normalizeOrigin(origin))
+  .map((origin) => canonicalOrigin(origin))
   .filter(Boolean);
 
 // Always merge env origins with local dev defaults. Production used to be env-only; an empty
 // FRONTEND_URL on Render then blocked every browser origin and looked like a "connection" failure.
-const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...allowedOriginsFromEnv]));
+const allowedOrigins = Array.from(
+  new Set([
+    ...DEFAULT_ALLOWED_ORIGINS.map((o) => canonicalOrigin(o)),
+    ...allowedOriginsFromEnv,
+  ])
+);
 
+// Default true: any https://*.vercel.app (previews + production). Set CORS_ALLOW_VERCEL_PREVIEW=false to disable.
 const allowVercelPreview =
-  String(process.env.CORS_ALLOW_VERCEL_PREVIEW || '').toLowerCase() === 'true';
+  String(process.env.CORS_ALLOW_VERCEL_PREVIEW || 'true').toLowerCase() !== 'false';
 
 if (isProduction && allowedOriginsFromEnv.length === 0) {
   console.warn(
@@ -85,12 +114,10 @@ app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      const key = canonicalOrigin(origin);
+      if (key && allowedOrigins.includes(key)) return callback(null, true);
 
-      if (
-        allowVercelPreview &&
-        /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
-      ) {
+      if (allowVercelPreview && isPublicVercelAppOrigin(origin)) {
         return callback(null, true);
       }
 
@@ -98,7 +125,10 @@ app.use(
         console.warn('CORS blocked for origin:', origin);
         console.warn('Allowed origins:', allowedOrigins);
       } else {
-        console.warn('[CORS] Blocked origin (add it to FRONTEND_URL or set CORS_ALLOW_VERCEL_PREVIEW=true for *.vercel.app):', origin);
+        console.warn(
+          '[CORS] Blocked origin (add canonical URL to FRONTEND_URL, no trailing slash; or keep CORS_ALLOW_VERCEL_PREVIEW=true for *.vercel.app):',
+          origin
+        );
       }
 
       return callback(new Error('Origin not allowed by CORS'));
