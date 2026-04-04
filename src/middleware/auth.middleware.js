@@ -40,8 +40,8 @@ const authenticateToken = async (req, res, next) => {
         userId: true,
         role: true,
         schoolId: true,
-        classId: true,
         isActive: true,
+        student: { select: { classId: true } },
       },
     });
 
@@ -56,7 +56,7 @@ const authenticateToken = async (req, res, next) => {
       userId: user.userId,
       role: user.role,
       schoolId: user.schoolId,
-      classId: user.classId
+      classId: user.student?.classId ?? null,
     };
 
     // ============================================

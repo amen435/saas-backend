@@ -7,10 +7,14 @@ const { getAvailableRolesForUser } = require('../utils/role.utils');
 const {
   AUTH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
+  parseCookies,
   serializeCookie,
   getCookieOptions,
   generateCsrfToken,
 } = require('../utils/security.utils');
+
+const resolveUserClassId = (user) =>
+  user?.student?.classId != null ? user.student.classId : null;
 
 const buildUserPayload = async (user) => {
   const roles = await getAvailableRolesForUser({
@@ -28,7 +32,7 @@ const buildUserPayload = async (user) => {
     schoolId: user.schoolId,
     schoolCode: user.school?.schoolCode || null,
     schoolName: user.school?.schoolName || null,
-    classId: user.classId,
+    classId: resolveUserClassId(user),
     roles,
   };
 };
@@ -72,7 +76,8 @@ const login = async (req, res) => {
             schoolName: true,
             isActive: true
           }
-        }
+        },
+        student: { select: { classId: true } },
       }
     });
 
@@ -102,11 +107,23 @@ const login = async (req, res) => {
     // ============================================
     // 5. VERIFY PASSWORD
     // ============================================
-    const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+    let passwordMatch = false;
+    try {
+      passwordMatch = await bcrypt.compare(password, user.passwordHash || '');
+    } catch (bcryptErr) {
+      // Non-bcrypt or corrupted passwordHash throws — avoid 500; log for admins
+      console.error('Login bcrypt error (check users.passwordHash):', bcryptErr?.message || bcryptErr);
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials',
+      });
+    }
 
     if (!passwordMatch) {
       // Increment failed attempts
-      const newFailedAttempts = user.failedAttempts + 1;
+      const prevAttempts = Number(user.failedAttempts);
+      const safeAttempts = Number.isFinite(prevAttempts) ? prevAttempts : 0;
+      const newFailedAttempts = safeAttempts + 1;
       let lockedUntil = null;
 
       // Lock account after 5 failed attempts (30 minutes)
@@ -196,24 +213,31 @@ const login = async (req, res) => {
       userId: user.userId,
       role: user.role,
       schoolId: user.schoolId,
-      classId: user.classId
+      classId: resolveUserClassId(user),
     };
 
-    const token = jwt.sign(
-      tokenPayload,
-      process.env.JWT_SECRET,
-      {
-        expiresIn: process.env.JWT_EXPIRY || '1d',
+    const expiresIn = String(process.env.JWT_EXPIRY || '1d').trim() || '1d';
+    let token;
+    try {
+      token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+        expiresIn,
         issuer: 'intelligeschool-api',
-        audience: 'intelligeschool-client'
-      }
-    );
+        audience: 'intelligeschool-client',
+      });
+    } catch (jwtErr) {
+      console.error('Login JWT sign error:', jwtErr?.message || jwtErr);
+      return res.status(500).json({
+        success: false,
+        error: 'Login service misconfigured. Check JWT_SECRET and JWT_EXPIRY.',
+      });
+    }
 
     const csrfToken = generateCsrfToken();
     const cookieOptions = getCookieOptions();
+    // JWT and hex CSRF are cookie-safe; avoid encodeURIComponent (breaks '=' in JWT, inflates size).
     res.setHeader('Set-Cookie', [
-      serializeCookie(AUTH_COOKIE_NAME, token, cookieOptions.auth),
-      serializeCookie(CSRF_COOKIE_NAME, csrfToken, cookieOptions.csrf),
+      serializeCookie(AUTH_COOKIE_NAME, token, { ...cookieOptions.auth, encodeValue: false }),
+      serializeCookie(CSRF_COOKIE_NAME, csrfToken, { ...cookieOptions.csrf, encodeValue: false }),
     ]);
 
     // ============================================
@@ -232,17 +256,36 @@ const login = async (req, res) => {
           schoolId: user.schoolId,
           schoolCode: user.school?.schoolCode || null,
           schoolName: user.school?.schoolName || null,
-          classId: user.classId,
+          classId: resolveUserClassId(user),
           roles: rolesArray,
-        }
-      }
+        },
+        // Lets SPA on another origin (e.g. localhost) send X-CSRF-Token; that host cannot read csrf_token cookie.
+        csrfToken,
+      },
     });
 
   } catch (error) {
     console.error('Login error:', error);
+    const isProd = (process.env.NODE_ENV || 'development') === 'production';
+    const msg = String(error?.message || '');
+    const isDbUnreachable =
+      error?.code === 'P1001' ||
+      error?.name === 'PrismaClientInitializationError' ||
+      msg.includes("Can't reach database server");
+
+    if (isDbUnreachable) {
+      return res.status(503).json({
+        success: false,
+        error:
+          'Cannot connect to the database. In saas-backend/.env set DATABASE_URL to your PostgreSQL server (e.g. localhost, not the placeholder hostname "host") and ensure Postgres is running.',
+        ...(!isProd ? { debug: msg } : {}),
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: 'An error occurred during login. Please try again.'
+      error: 'An error occurred during login. Please try again.',
+      ...(!isProd && msg ? { debug: msg } : {}),
     });
   }
 };
@@ -263,6 +306,7 @@ const verifyToken = async (req, res) => {
             schoolName: true,
           },
         },
+        student: { select: { classId: true } },
       },
     });
 
@@ -275,12 +319,16 @@ const verifyToken = async (req, res) => {
 
     const payload = await buildUserPayload(user);
 
+    const cookies = parseCookies(req.headers.cookie || '');
+    const csrfFromCookie = cookies[CSRF_COOKIE_NAME] || null;
+
     res.status(200).json({
       success: true,
       message: 'Token is valid',
       data: {
         user: payload,
-      }
+        ...(csrfFromCookie ? { csrfToken: csrfFromCookie } : {}),
+      },
     });
   } catch (error) {
     console.error('Token verification error:', error);
@@ -300,8 +348,8 @@ const logout = async (req, res) => {
   try {
     const cookieOptions = getCookieOptions();
     res.setHeader('Set-Cookie', [
-      serializeCookie(AUTH_COOKIE_NAME, '', { ...cookieOptions.auth, maxAge: 0 }),
-      serializeCookie(CSRF_COOKIE_NAME, '', { ...cookieOptions.csrf, maxAge: 0 }),
+      serializeCookie(AUTH_COOKIE_NAME, '', { ...cookieOptions.auth, maxAge: 0, encodeValue: false }),
+      serializeCookie(CSRF_COOKIE_NAME, '', { ...cookieOptions.csrf, maxAge: 0, encodeValue: false }),
     ]);
     
     res.status(200).json({

@@ -59,6 +59,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:8081',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  // Deployed SPA (CORS); also set FRONTEND_URL on Render for your canonical origin(s).
+  'https://saas-alpha-gold.vercel.app',
 ];
 
 const allowedOriginsFromEnv = normalizeOrigin(process.env.FRONTEND_URL)
@@ -66,9 +68,18 @@ const allowedOriginsFromEnv = normalizeOrigin(process.env.FRONTEND_URL)
   .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 
-const allowedOrigins = isProduction
-  ? allowedOriginsFromEnv
-  : Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...allowedOriginsFromEnv]));
+// Always merge env origins with local dev defaults. Production used to be env-only; an empty
+// FRONTEND_URL on Render then blocked every browser origin and looked like a "connection" failure.
+const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...allowedOriginsFromEnv]));
+
+const allowVercelPreview =
+  String(process.env.CORS_ALLOW_VERCEL_PREVIEW || '').toLowerCase() === 'true';
+
+if (isProduction && allowedOriginsFromEnv.length === 0) {
+  console.warn(
+    '[CORS] FRONTEND_URL is empty. Localhost origins are still allowed; add FRONTEND_URL on the host (e.g. https://your-app.vercel.app) so your deployed SPA can call this API.'
+  );
+}
 
 app.use(
   cors({
@@ -76,9 +87,18 @@ app.use(
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
 
+      if (
+        allowVercelPreview &&
+        /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
+      ) {
+        return callback(null, true);
+      }
+
       if (!isProduction) {
         console.warn('CORS blocked for origin:', origin);
         console.warn('Allowed origins:', allowedOrigins);
+      } else {
+        console.warn('[CORS] Blocked origin (add it to FRONTEND_URL or set CORS_ALLOW_VERCEL_PREVIEW=true for *.vercel.app):', origin);
       }
 
       return callback(new Error('Origin not allowed by CORS'));

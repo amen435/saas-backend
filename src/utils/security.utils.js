@@ -21,14 +21,17 @@ const parseCookies = (cookieHeader = '') => {
 };
 
 const serializeCookie = (name, value, options = {}) => {
-  const parts = [`${encodeURIComponent(name)}=${encodeURIComponent(value)}`];
+  const { encodeValue = true, ...cookieOpts } = options;
+  const namePart = encodeURIComponent(name);
+  const valuePart = encodeValue ? encodeURIComponent(String(value)) : String(value);
+  const parts = [`${namePart}=${valuePart}`];
 
-  if (options.maxAge !== undefined) parts.push(`Max-Age=${options.maxAge}`);
-  if (options.domain) parts.push(`Domain=${options.domain}`);
-  if (options.path) parts.push(`Path=${options.path}`);
-  if (options.httpOnly) parts.push('HttpOnly');
-  if (options.secure) parts.push('Secure');
-  if (options.sameSite) parts.push(`SameSite=${options.sameSite}`);
+  if (cookieOpts.maxAge !== undefined) parts.push(`Max-Age=${cookieOpts.maxAge}`);
+  if (cookieOpts.domain) parts.push(`Domain=${cookieOpts.domain}`);
+  if (cookieOpts.path) parts.push(`Path=${cookieOpts.path}`);
+  if (cookieOpts.httpOnly) parts.push('HttpOnly');
+  if (cookieOpts.secure) parts.push('Secure');
+  if (cookieOpts.sameSite) parts.push(`SameSite=${cookieOpts.sameSite}`);
 
   return parts.join('; ');
 };
