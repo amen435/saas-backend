@@ -243,6 +243,9 @@ const login = async (req, res) => {
     // ============================================
     // 11. RETURN SUCCESS RESPONSE
     // ============================================
+    const sendTokenInBody =
+      String(process.env.ACCESS_TOKEN_IN_BODY || '').toLowerCase() === 'true';
+
     res.status(200).json({
       success: true,
       message: 'Login successful',
@@ -261,6 +264,8 @@ const login = async (req, res) => {
         },
         // Lets SPA on another origin (e.g. localhost) send X-CSRF-Token; that host cannot read csrf_token cookie.
         csrfToken,
+        // Optional: Vercel→Render cross-site when third-party cookies are blocked; prefer HttpOnly cookie when possible.
+        ...(sendTokenInBody ? { accessToken: token } : {}),
       },
     });
 

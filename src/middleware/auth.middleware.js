@@ -15,12 +15,20 @@ const {
  * Verifies token from Authorization header
  * Attaches decoded user data to req.user
  */
+const extractBearerToken = (req) => {
+  const raw = req.headers.authorization || req.headers.Authorization;
+  if (!raw) return null;
+  const m = String(raw).trim().match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : null;
+};
+
 const authenticateToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const bearerToken = authHeader && authHeader.split(' ')[1];
+    const bearerToken = extractBearerToken(req);
     const cookies = parseCookies(req.headers.cookie || '');
-    const token = bearerToken || cookies[AUTH_COOKIE_NAME];
+    const cookieToken = cookies[AUTH_COOKIE_NAME] ? String(cookies[AUTH_COOKIE_NAME]).trim() : null;
+    // Prefer HttpOnly cookie when present so an old Bearer in sessionStorage cannot override a fresh cookie.
+    const token = cookieToken || bearerToken;
 
     if (!token) {
       return res.status(401).json({
@@ -31,7 +39,8 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, {
       issuer: 'intelligeschool-api',
-      audience: 'intelligeschool-client'
+      audience: 'intelligeschool-client',
+      clockTolerance: 30,
     });
 
     const user = await prisma.user.findUnique({
