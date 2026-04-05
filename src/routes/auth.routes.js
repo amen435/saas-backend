@@ -26,6 +26,18 @@ const loginLimiter = rateLimit({
 // ============================================
 
 /**
+ * Browsers open URLs with GET. Login is POST-only; return 405 so health checks are not confused with "missing route".
+ */
+router.get('/login', (req, res) => {
+  res.setHeader('Allow', 'POST');
+  return res.status(405).json({
+    success: false,
+    error: 'Method Not Allowed',
+    hint: 'Use POST /api/auth/login with JSON body: { "username", "password", "schoolId" }.',
+  });
+});
+
+/**
  * @route   POST /api/auth/login
  * @desc    Login user with username and password
  * @access  Public

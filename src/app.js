@@ -82,8 +82,9 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:8081',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  // Deployed SPA (CORS); also set FRONTEND_URL on Render for your canonical origin(s).
+  // Deployed SPAs (CORS). *.vercel.app is also allowed when CORS_ALLOW_VERCEL_PREVIEW is not false.
   'https://saas-alpha-gold.vercel.app',
+  'https://saas-intellicampuse.vercel.app',
 ];
 
 const allowedOriginsFromEnv = normalizeOrigin(process.env.FRONTEND_URL)
@@ -134,6 +135,14 @@ app.use(
       return callback(new Error('Origin not allowed by CORS'));
     },
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-CSRF-Token',
+      'X-Active-Role',
+    ],
+    maxAge: 86400,
   })
 );
 
