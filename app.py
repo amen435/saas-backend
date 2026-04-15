@@ -21,6 +21,7 @@ ENABLE_ESP32_SYNC = os.getenv("ENABLE_ESP32_SYNC", "0").lower() in ("1", "true",
 FACE_API_KEY = os.getenv("FACE_API_KEY", "").strip()
 FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "buffalo_s").strip() or "buffalo_s"
 FACE_DET_SIZE = int(os.getenv("FACE_DET_SIZE", "320"))
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes", "on")
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -353,4 +354,4 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     logger.info("Starting Flask app")
     logger.info("Webpage: http://127.0.0.1:%s", port)
-    app.run(host=host, port=port, debug=True)
+    app.run(host=host, port=port, debug=FLASK_DEBUG, use_reloader=False)
