@@ -21,5 +21,12 @@ router.get(
   parentController.getMyChildren
 );
 
-module.exports = router;
+router.get(
+  '/attendance',
+  requireAnyPermission(['attendance:read:child']),
+  requireRole(['PARENT']),
+  auditAuthorizedAccess('parents.read.attendance_timeline'),
+  parentController.getAttendanceTimeline
+);
 
+module.exports = router;

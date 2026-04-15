@@ -761,6 +761,41 @@ const getMyChildren = async (req, res) => {
   }
 };
 
+const getAttendanceTimeline = async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { studentId, date } = req.query;
+
+    if (!studentId || !date) {
+      return res.status(400).json({
+        success: false,
+        error: 'studentId and date are required',
+      });
+    }
+
+    const attendanceService = require('../services/attendance.service');
+    const data = await attendanceService.getParentAttendanceTimeline({
+      schoolId,
+      userId,
+      studentId,
+      date,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Get parent attendance timeline error:', error);
+    return res.status(
+      error.message.includes('not found') || error.message.includes('not linked') ? 404 : 500
+    ).json({
+      success: false,
+      error: error.message || 'Failed to fetch attendance timeline',
+    });
+  }
+};
+
 module.exports = {
   createParent,
   getClassParents,
@@ -769,4 +804,5 @@ module.exports = {
   addChildToParent,
   removeChildFromParent,
   getMyChildren,
+  getAttendanceTimeline,
 };

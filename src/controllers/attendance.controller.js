@@ -1,6 +1,7 @@
 // src/controllers/attendance.controller.js
 const prisma = require('../config/database');
 const attendanceService = require('../services/attendance.service');
+const attendanceRecognitionService = require('../services/attendanceRecognition.service');
 const {
   validateAttendanceData,
   validateBulkAttendance,
@@ -295,11 +296,105 @@ const deleteAttendance = async (req, res) => {
   }
 };
 
+const getSchoolWideAttendanceSummary = async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const data = await attendanceService.getSchoolAttendanceSummary({
+      schoolId,
+      date: req.query.date,
+      classId: req.query.classId,
+      role: req.query.role,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Get school attendance summary error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch attendance summary',
+    });
+  }
+};
+
+const getAllAttendance = async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const data = await attendanceService.getSchoolAttendanceRecords({
+      schoolId,
+      date: req.query.date,
+      classId: req.query.classId,
+      role: req.query.role,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Get all attendance error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch attendance records',
+    });
+  }
+};
+
+const getAttendanceAlerts = async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const data = await attendanceService.getAlerts({
+      schoolId,
+      date: req.query.date,
+      classId: req.query.classId,
+      studentId: req.query.studentId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Get attendance alerts error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch attendance alerts',
+    });
+  }
+};
+
+/**
+ * @route   POST /api/attendance/recognize
+ * @desc    Recognize a face and record timetable-aware attendance
+ * @access  Device-triggered
+ */
+const recognizeAttendance = async (req, res) => {
+  try {
+    const payload = req.validatedBody || req.body || {};
+    const result = await attendanceRecognitionService.recognize(payload);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Recognize attendance error:', error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      error: error.message || 'Failed to recognize attendance.',
+      ...(error.details ? error.details : {}),
+    });
+  }
+};
+
 module.exports = {
   recordAttendance,
   recordBulkAttendance,
+  getAllAttendance,
+  getAttendanceAlerts,
   getClassAttendance,
   getStudentAttendance,
   getClassAttendanceReport,
+  getSchoolWideAttendanceSummary,
   deleteAttendance,
+  recognizeAttendance,
 };

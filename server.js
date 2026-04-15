@@ -1,5 +1,14 @@
 require('dotenv').config();
+const http = require('http');
 const app = require('./src/app');
+const { setIo } = require('./src/services/socket.service');
+
+let SocketIoServer = null;
+try {
+  ({ Server: SocketIoServer } = require('socket.io'));
+} catch (error) {
+  SocketIoServer = null;
+}
 
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -34,9 +43,31 @@ const assertRequiredEnv = () => {
 
 assertRequiredEnv();
 
-app.listen(PORT, HOST, () => {
+const httpServer = http.createServer(app);
+if (SocketIoServer) {
+  const io = new SocketIoServer(httpServer, {
+    cors: {
+      origin: String(process.env.FRONTEND_URL || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+      credentials: true,
+    },
+  });
+
+  setIo(io);
+} else {
+  console.warn('Socket.IO dependency not installed; real-time attendance events are disabled.');
+}
+
+httpServer.listen(PORT, HOST, () => {
   const healthHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
   console.log(`Server running on ${HOST}:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Health check: http://${healthHost}:${PORT}/api`);
+  console.log(
+    SocketIoServer
+      ? `Socket.IO enabled on http://${healthHost}:${PORT}`
+      : 'Socket.IO disabled until dependencies are installed.'
+  );
 });

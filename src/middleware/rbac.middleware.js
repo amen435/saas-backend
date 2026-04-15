@@ -1,29 +1,18 @@
-// src/middleware/rbac.middleware.js
-
-/**
- * Role-Based Access Control Middleware
- * Checks if user has required role(s)
- */
 const { writeAudit } = require('../utils/auditLogger');
 
 const requireRole = (allowedRoles) => {
+  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+
   return (req, res, next) => {
     try {
-      // Ensure user is authenticated
       if (!req.user || !req.user.role) {
         return res.status(401).json({
           success: false,
-          error: 'Authentication required.'
+          error: 'Authentication required.',
         });
       }
 
-      // Convert single role to array
-      const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
-
-      // Role is resolved server-side from verified session.
       const effectiveRole = req.user.activeRole || req.user.role;
-
-      // Check if user's effective role is allowed
       if (!roles.includes(effectiveRole)) {
         writeAudit('auth.forbidden_role', {
           userId: req.user.userId,
@@ -35,26 +24,23 @@ const requireRole = (allowedRoles) => {
         });
         return res.status(403).json({
           success: false,
-          error: 'Access denied. Insufficient permissions.'
+          error: 'Access denied. Insufficient permissions.',
         });
       }
 
-      next();
-
+      return next();
     } catch (error) {
       console.error('Role check error:', error);
       return res.status(500).json({
         success: false,
-        error: 'Permission verification failed.'
+        error: 'Permission verification failed.',
       });
     }
   };
 };
 
-/**
- * Permission middleware using a static role->permissions map.
- * This keeps handlers explicit while remaining backward compatible.
- */
+const authorizeRoles = (...roles) => requireRole(roles);
+
 const ROLE_PERMISSIONS = {
   SUPER_ADMIN: ['*'],
   SCHOOL_ADMIN: ['users:read', 'users:write', 'school:manage', 'system:admin', 'messages:read', 'messages:write'],
@@ -118,6 +104,7 @@ const requirePermission = (permission) => {
 
 const requireAnyPermission = (permissions) => {
   const requiredPermissions = Array.isArray(permissions) ? permissions : [permissions];
+
   return (req, res, next) => {
     try {
       if (!req.user || !req.user.role) {
@@ -140,6 +127,7 @@ const requireAnyPermission = (permissions) => {
         method: req.method,
         ip: req.ip,
       });
+
       return res.status(403).json({
         success: false,
         error: 'Access denied. Missing required permission.',
@@ -154,56 +142,38 @@ const requireAnyPermission = (permissions) => {
   };
 };
 
-/**
- * Multi-tenant isolation middleware
- * Verifies user belongs to requested school
- */
 const requireSchool = (req, res, next) => {
   try {
     const { schoolId } = req.params;
 
-    // Super Admin can access all schools
     if (req.user.role === 'SUPER_ADMIN') {
       return next();
     }
 
-    // Check if user's schoolId matches requested schoolId
-    if (!req.user.schoolId || req.user.schoolId !== parseInt(schoolId)) {
+    if (!req.user.schoolId || req.user.schoolId !== Number.parseInt(schoolId, 10)) {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. You can only access your own school data.'
+        error: 'Access denied. You can only access your own school data.',
       });
     }
 
-    next();
-
+    return next();
   } catch (error) {
     console.error('School check error:', error);
     return res.status(500).json({
       success: false,
-      error: 'School verification failed.'
+      error: 'School verification failed.',
     });
   }
 };
 
-// ============================================
-// PRE-DEFINED ROLE CHECKS
-// ============================================
-
 const requireSuperAdmin = requireRole('SUPER_ADMIN');
-
 const requireAdmin = requireRole(['SUPER_ADMIN', 'SCHOOL_ADMIN']);
-
-const requireTeacher = requireRole([
-  'SUPER_ADMIN',
-  'SCHOOL_ADMIN',
-  'TEACHER',
-  'HOMEROOM_TEACHER'
-]);
-
+const requireTeacher = requireRole(['SUPER_ADMIN', 'SCHOOL_ADMIN', 'TEACHER', 'HOMEROOM_TEACHER']);
 const requireHomeroomTeacher = requireRole('HOMEROOM_TEACHER');
 
 module.exports = {
+  authorizeRoles,
   requireRole,
   requireSchool,
   requireSuperAdmin,

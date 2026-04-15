@@ -1,511 +1,513 @@
-// src/controllers/teacher.controller.js
-
 const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
 const { validatePasswordStrength } = require('../utils/password.utils');
+const { generateFaceEmbedding } = require('../services/faceEmbedding.service');
+const { uploadImage } = require('../services/uploadService');
+const {
+  STATUS,
+  buildListFilters,
+  ensureSchoolClass,
+  ensureUniqueUserIdentifiers,
+  normalizeOptionalString,
+  normalizeRequiredString,
+  normalizeStatusInput,
+  parseInteger,
+  statusToActive,
+} = require('../utils/adminManagement.utils');
 
-/**
- * @route   POST /api/admin/teachers
- * @desc    Create a new teacher (School Admin)
- * @access  SCHOOL_ADMIN
- */
+function sendError(res, error, fallbackMessage) {
+  const statusCode = error?.statusCode || 500;
+  return res.status(statusCode).json({
+    success: false,
+    error: statusCode === 500 ? fallbackMessage : error.message,
+  });
+}
+
+function buildTeacherInclude() {
+  return {
+    user: {
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        role: true,
+        status: true,
+        isActive: true,
+        lastLogin: true,
+      },
+    },
+    school: {
+      select: {
+        schoolId: true,
+        schoolName: true,
+        schoolCode: true,
+      },
+    },
+    homeroomClasses: {
+      select: {
+        classId: true,
+        className: true,
+        gradeLevel: true,
+        section: true,
+        academicYear: true,
+      },
+    },
+    classTeachers: {
+      include: {
+        class: {
+          select: {
+            classId: true,
+            className: true,
+            gradeLevel: true,
+            section: true,
+            academicYear: true,
+          },
+        },
+      },
+    },
+  };
+}
+
+async function syncHomeroomAssignment(tx, teacherId, schoolId, teacherRole, classId) {
+  if (teacherRole !== 'HOMEROOM_TEACHER') {
+    await tx.class.updateMany({
+      where: {
+        schoolId,
+        homeroomTeacherId: teacherId,
+      },
+      data: {
+        homeroomTeacherId: null,
+      },
+    });
+    return null;
+  }
+
+  if (!classId) {
+    return null;
+  }
+
+  const classRecord = await ensureSchoolClass(classId, schoolId);
+
+  await tx.class.updateMany({
+    where: {
+      schoolId,
+      homeroomTeacherId: teacherId,
+      classId: { not: classRecord.classId },
+    },
+    data: {
+      homeroomTeacherId: null,
+    },
+  });
+
+  await tx.class.update({
+    where: { classId: classRecord.classId },
+    data: { homeroomTeacherId: teacherId },
+  });
+
+  return classRecord.classId;
+}
+
 const createTeacher = async (req, res) => {
   try {
-    const {
-      userId,
-      username,
-      email,
-      password,
-      fullName,
-      phone,
-      role,
-      specialization
-    } = req.body;
-
     const { schoolId } = req.user;
+    const payload = req.validatedBody || req.body || {};
+    const userId = normalizeRequiredString(payload.userId, 'userId');
+    const username = normalizeRequiredString(payload.username, 'username');
+    const password = normalizeRequiredString(payload.password, 'password');
+    const fullName = normalizeRequiredString(payload.fullName, 'fullName');
+    const teacherRole = String(payload.role || 'TEACHER').trim().toUpperCase();
 
-    if (!userId || !username || !password || !fullName) {
+    if (!['TEACHER', 'HOMEROOM_TEACHER'].includes(teacherRole)) {
       return res.status(400).json({
         success: false,
-        error: 'userId, username, password, and fullName are required'
+        error: 'Role must be TEACHER or HOMEROOM_TEACHER.',
       });
     }
 
     const passwordError = validatePasswordStrength(password);
     if (passwordError) {
-      return res.status(400).json({
-        success: false,
-        error: passwordError
-      });
+      return res.status(400).json({ success: false, error: passwordError });
     }
 
-    const teacherRole = role || 'TEACHER';
-    if (!['TEACHER', 'HOMEROOM_TEACHER'].includes(teacherRole)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Role must be TEACHER or HOMEROOM_TEACHER'
-      });
-    }
-
-    const existingUserId = await prisma.user.findUnique({
-      where: { userId }
+    await ensureUniqueUserIdentifiers({
+      userId,
+      username,
+      email: normalizeOptionalString(payload.email),
     });
-    if (existingUserId) {
-      return res.status(409).json({
-        success: false,
-        error: 'User ID already exists'
-      });
-    }
 
-    const existingUsername = await prisma.user.findUnique({
-      where: { username }
+    const status = normalizeStatusInput(payload.status ?? payload.isActive, STATUS.ACTIVE);
+    const sourceImage = payload.faceImageBase64 || payload.photoBase64;
+    const biometric = await generateFaceEmbedding(sourceImage);
+    const upload = await uploadImage({
+      imageBase64: sourceImage,
+      entity: 'teachers',
+      identifier: userId,
     });
-    if (existingUsername) {
-      return res.status(409).json({
-        success: false,
-        error: 'Username already exists'
-      });
-    }
 
-    if (email) {
-      const existingEmail = await prisma.user.findUnique({
-        where: { email }
-      });
-      if (existingEmail) {
-        return res.status(409).json({
-          success: false,
-          error: 'Email already exists'
-        });
-      }
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    const result = await prisma.$transaction(async (tx) => {
+    const createdTeacher = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           userId,
           username,
-          email: email || null,
-          passwordHash,
+          email: normalizeOptionalString(payload.email),
+          passwordHash: await bcrypt.hash(password, 10),
           role: teacherRole,
           schoolId,
           fullName,
-          phone: phone || null,
-          isActive: true,
-          failedAttempts: 0
-        }
+          phone: normalizeOptionalString(payload.phone),
+          status,
+          isActive: statusToActive(status),
+          failedAttempts: 0,
+        },
       });
 
       const teacher = await tx.teacher.create({
         data: {
           userId: user.userId,
           schoolId,
-          specialization: specialization || null,
-          isActive: true
+          status,
+          specialization: normalizeOptionalString(payload.specialization),
+          classId: payload.classId ? parseInteger(payload.classId, 'classId') : null,
+          photoUrl: upload.photoUrl,
+          photoBase64: null,
+          faceEmbedding: biometric.faceEmbedding,
+          isActive: statusToActive(status),
         },
-        include: {
-          user: {
-            select: {
-              userId: true,
-              username: true,
-              email: true,
-              fullName: true,
-              phone: true,
-              role: true,
-              isActive: true
-            }
-          },
-          school: {
-            select: {
-              schoolId: true,
-              schoolName: true,
-              schoolCode: true
-            }
-          }
-        }
       });
 
-      return teacher;
+      const syncedClassId = await syncHomeroomAssignment(
+        tx,
+        teacher.teacherId,
+        schoolId,
+        teacherRole,
+        payload.classId ? parseInteger(payload.classId, 'classId') : null
+      );
+
+      return tx.teacher.update({
+        where: { teacherId: teacher.teacherId },
+        data: { classId: syncedClassId ?? teacher.classId },
+        include: buildTeacherInclude(),
+      });
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: 'Teacher created successfully',
-      data: result
+      message: 'Teacher created successfully.',
+      data: createdTeacher,
     });
   } catch (error) {
     console.error('Create teacher error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create teacher'
-    });
+    return sendError(res, error, 'Failed to create teacher.');
   }
 };
 
-/**
- * @route   GET /api/admin/teachers
- * @desc    Get all teachers for school admin's school
- * @access  SCHOOL_ADMIN
- */
 const getAllTeachers = async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { isActive, role, search } = req.query;
-
     const where = {
-      schoolId
+      schoolId,
+      ...buildListFilters(req.query),
     };
 
-    if (isActive !== undefined) {
-      where.isActive = isActive === 'true';
+    const role = String(req.query.role || '').trim().toUpperCase();
+    if (['TEACHER', 'HOMEROOM_TEACHER'].includes(role)) {
+      where.user = { role };
     }
 
-    if (role && ['TEACHER', 'HOMEROOM_TEACHER'].includes(role)) {
-      where.user = {
-        role
-      };
-    }
-
-    if (search) {
+    if (req.query.classId) {
       where.OR = [
+        { classId: parseInteger(req.query.classId, 'classId') },
+        { homeroomClasses: { some: { classId: parseInteger(req.query.classId, 'classId') } } },
+      ];
+    }
+
+    const search = String(req.query.search || '').trim();
+    if (search) {
+      where.AND = [
+        ...(where.AND || []),
         {
-          user: {
-            fullName: { contains: search }
-          }
+          OR: [
+            { user: { fullName: { contains: search, mode: 'insensitive' } } },
+            { user: { username: { contains: search, mode: 'insensitive' } } },
+            { specialization: { contains: search, mode: 'insensitive' } },
+          ],
         },
-        {
-          user: {
-            username: { contains: search }
-          }
-        },
-        {
-          specialization: { contains: search }
-        }
       ];
     }
 
     const teachers = await prisma.teacher.findMany({
       where,
+      include: buildTeacherInclude(),
+      orderBy: [{ createdAt: 'desc' }, { teacherId: 'desc' }],
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: teachers.length,
+      data: teachers,
+    });
+  } catch (error) {
+    console.error('Get all teachers error:', error);
+    return sendError(res, error, 'Failed to fetch teachers.');
+  }
+};
+
+const getTeacherById = async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const teacherId = parseInteger(req.params.id || req.params.teacherId, 'teacherId');
+
+    const teacher = await prisma.teacher.findFirst({
+      where: {
+        teacherId,
+        schoolId,
+      },
+      include: buildTeacherInclude(),
+    });
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        error: 'Teacher not found.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: teacher,
+    });
+  } catch (error) {
+    console.error('Get teacher error:', error);
+    return sendError(res, error, 'Failed to fetch teacher.');
+  }
+};
+
+const updateTeacher = async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const teacherId = parseInteger(req.params.id || req.params.teacherId, 'teacherId');
+    const payload = req.validatedBody || req.body || {};
+
+    const existingTeacher = await prisma.teacher.findFirst({
+      where: { teacherId, schoolId },
       include: {
         user: {
           select: {
             userId: true,
-            username: true,
-            email: true,
-            fullName: true,
-            phone: true,
             role: true,
-            isActive: true,
-            lastLogin: true
-          }
-        },
-        _count: {
-          select: {
-            classTeachers: true,
-            homeroomClasses: true
-          }
-        }
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
-    });
-
-    res.status(200).json({
-      success: true,
-      count: teachers.length,
-      data: teachers
-    });
-  } catch (error) {
-    console.error('Get all teachers error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch teachers'
-    });
-  }
-};
-
-/**
- * @route   GET /api/admin/teachers/:teacherId
- * @desc    Get single teacher
- * @access  SCHOOL_ADMIN
- */
-const getTeacherById = async (req, res) => {
-  try {
-    const { teacherId } = req.params;
-    const { schoolId } = req.user;
-
-    const teacher = await prisma.teacher.findFirst({
-      where: {
-        teacherId: parseInt(teacherId),
-        schoolId
-      },
-      include: {
-        user: true,
-        school: {
-          select: {
-            schoolId: true,
-            schoolName: true,
-            schoolCode: true
-          }
-        },
-        classTeachers: {
-          include: {
-            class: {
-              select: {
-                classId: true,
-                className: true,
-                gradeLevel: true,
-                section: true,
-                academicYear: true
-              }
-            }
-          }
-        },
-        homeroomClasses: {
-          select: {
-            classId: true,
-            className: true,
-            gradeLevel: true,
-            section: true,
-            academicYear: true
-          }
-        }
-      }
-    });
-
-    if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher not found'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: teacher
-    });
-  } catch (error) {
-    console.error('Get teacher by id error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch teacher'
-    });
-  }
-};
-
-/**
- * @route   PUT /api/admin/teachers/:teacherId
- * @desc    Update teacher
- * @access  SCHOOL_ADMIN
- */
-const updateTeacher = async (req, res) => {
-  try {
-    const { teacherId } = req.params;
-    const { schoolId } = req.user;
-    const { fullName, phone, email, specialization, role } = req.body;
-
-    const teacher = await prisma.teacher.findFirst({
-      where: {
-        teacherId: parseInt(teacherId),
-        schoolId
-      }
-    });
-
-    if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher not found'
-      });
-    }
-
-    if (role && !['TEACHER', 'HOMEROOM_TEACHER'].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Role must be TEACHER or HOMEROOM_TEACHER'
-      });
-    }
-
-    if (email) {
-      const existingEmail = await prisma.user.findFirst({
-        where: {
-          email,
-          userId: {
-            not: teacher.userId
-          }
-        }
-      });
-      if (existingEmail) {
-        return res.status(409).json({
-          success: false,
-          error: 'Email already exists'
-        });
-      }
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { userId: teacher.userId },
-        data: {
-          fullName: fullName || undefined,
-          phone: phone || undefined,
-          email: email || undefined,
-          role: role || undefined
-        }
-      });
-
-      const updatedTeacher = await tx.teacher.update({
-        where: { teacherId: parseInt(teacherId) },
-        data: {
-          specialization: specialization || undefined
-        },
-        include: {
-          user: {
-            select: {
-              userId: true,
-              username: true,
-              email: true,
-              fullName: true,
-              phone: true,
-              role: true,
-              isActive: true
-            }
           },
-          school: {
-            select: {
-              schoolId: true,
-              schoolName: true,
-              schoolCode: true
-            }
-          }
-        }
-      });
-
-      return updatedTeacher;
+        },
+      },
     });
 
-    res.status(200).json({
+    if (!existingTeacher) {
+      return res.status(404).json({ success: false, error: 'Teacher not found.' });
+    }
+
+    const teacherRole = payload.role
+      ? String(payload.role).trim().toUpperCase()
+      : existingTeacher.user.role;
+
+    if (!['TEACHER', 'HOMEROOM_TEACHER'].includes(teacherRole)) {
+      return res.status(400).json({ success: false, error: 'Role must be TEACHER or HOMEROOM_TEACHER.' });
+    }
+
+    if (payload.email) {
+      await ensureUniqueUserIdentifiers({
+        email: normalizeOptionalString(payload.email),
+        excludeUserId: existingTeacher.userId,
+      });
+    }
+
+    const status = payload.status !== undefined || payload.isActive !== undefined
+      ? normalizeStatusInput(payload.status ?? payload.isActive, existingTeacher.status)
+      : existingTeacher.status;
+
+    const sourceImage = payload.faceImageBase64 || payload.photoBase64;
+    const biometric = sourceImage
+      ? await generateFaceEmbedding(sourceImage)
+      : null;
+    const upload = sourceImage
+      ? await uploadImage({
+          imageBase64: sourceImage,
+          entity: 'teachers',
+          identifier: existingTeacher.userId,
+        })
+      : null;
+
+    const updatedTeacher = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { userId: existingTeacher.userId },
+        data: {
+          fullName: payload.fullName !== undefined ? normalizeRequiredString(payload.fullName, 'fullName') : undefined,
+          email: payload.email !== undefined ? normalizeOptionalString(payload.email) : undefined,
+          phone: payload.phone !== undefined ? normalizeOptionalString(payload.phone) : undefined,
+          role: teacherRole,
+          status,
+          isActive: statusToActive(status),
+        },
+      });
+
+      const nextClassId = payload.classId !== undefined
+        ? (payload.classId ? parseInteger(payload.classId, 'classId') : null)
+        : existingTeacher.classId;
+
+      const syncedClassId = await syncHomeroomAssignment(tx, teacherId, schoolId, teacherRole, nextClassId);
+
+      return tx.teacher.update({
+        where: { teacherId },
+        data: {
+          specialization: payload.specialization !== undefined ? normalizeOptionalString(payload.specialization) : undefined,
+          classId: teacherRole === 'HOMEROOM_TEACHER' ? syncedClassId ?? nextClassId : null,
+          status,
+          photoUrl: upload ? upload.photoUrl : undefined,
+          photoBase64: biometric ? null : undefined,
+          faceEmbedding: biometric ? biometric.faceEmbedding : undefined,
+          isActive: statusToActive(status),
+        },
+        include: buildTeacherInclude(),
+      });
+    });
+
+    return res.status(200).json({
       success: true,
-      message: 'Teacher updated successfully',
-      data: result
+      message: 'Teacher updated successfully.',
+      data: updatedTeacher,
     });
   } catch (error) {
     console.error('Update teacher error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update teacher'
-    });
+    return sendError(res, error, 'Failed to update teacher.');
   }
 };
 
-/**
- * @route   PATCH /api/admin/teachers/:teacherId/deactivate
- * @desc    Deactivate teacher
- * @access  SCHOOL_ADMIN
- */
-const deactivateTeacher = async (req, res) => {
+const deleteTeacher = async (req, res) => {
   try {
-    const { teacherId } = req.params;
     const { schoolId } = req.user;
+    const teacherId = parseInteger(req.params.id || req.params.teacherId, 'teacherId');
 
     const teacher = await prisma.teacher.findFirst({
-      where: {
-        teacherId: parseInt(teacherId),
-        schoolId
-      }
+      where: { teacherId, schoolId },
+      select: { userId: true },
     });
 
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher not found'
-      });
+      return res.status(404).json({ success: false, error: 'Teacher not found.' });
     }
 
-    await prisma.$transaction([
-      prisma.user.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
         where: { userId: teacher.userId },
-        data: { isActive: false }
-      }),
-      prisma.teacher.update({
-        where: { teacherId: parseInt(teacherId) },
-        data: { isActive: false }
-      })
-    ]);
+        data: {
+          status: STATUS.INACTIVE,
+          isActive: false,
+        },
+      });
 
-    res.status(200).json({
+      await tx.teacher.update({
+        where: { teacherId },
+        data: {
+          status: STATUS.INACTIVE,
+          isActive: false,
+        },
+      });
+    });
+
+    return res.status(200).json({
       success: true,
-      message: 'Teacher deactivated successfully'
+      message: 'Teacher deactivated successfully.',
     });
   } catch (error) {
-    console.error('Deactivate teacher error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to deactivate teacher'
-    });
+    console.error('Delete teacher error:', error);
+    return sendError(res, error, 'Failed to delete teacher.');
   }
 };
 
-/**
- * @route   GET /api/teacher/my-classes
- * @desc    Get classes the teacher is assigned to
- * @access  TEACHER
- */
-const getMyClasses = async (req, res) => {
+const updateTeacherStatus = async (req, res) => {
   try {
-    const { schoolId, userId: teacherUserId } = req.user;
+    const { schoolId } = req.user;
+    const teacherId = parseInteger(req.params.id || req.params.teacherId, 'teacherId');
+    const status = normalizeStatusInput(req.body?.status ?? req.body?.isActive, STATUS.ACTIVE);
 
-    // Get teacher record
     const teacher = await prisma.teacher.findFirst({
-      where: {
-        userId: teacherUserId,
-        schoolId
-      }
+      where: { teacherId, schoolId },
+      select: { userId: true },
     });
 
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher record not found'
-      });
+      return res.status(404).json({ success: false, error: 'Teacher not found.' });
     }
 
-    // Get classes where teacher is assigned via classTeacher (subject-specific)
-    const classAssignments = await prisma.classTeacher.findMany({
+    const updatedTeacher = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { userId: teacher.userId },
+        data: {
+          status,
+          isActive: statusToActive(status),
+        },
+      });
+
+      return tx.teacher.update({
+        where: { teacherId },
+        data: {
+          status,
+          isActive: statusToActive(status),
+        },
+        include: buildTeacherInclude(),
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Teacher ${status === STATUS.ACTIVE ? 'activated' : 'deactivated'} successfully.`,
+      data: updatedTeacher,
+    });
+  } catch (error) {
+    console.error('Update teacher status error:', error);
+    return sendError(res, error, 'Failed to update teacher status.');
+  }
+};
+
+const deactivateTeacher = async (req, res) => {
+  req.body = { ...(req.body || {}), status: STATUS.INACTIVE };
+  return updateTeacherStatus(req, res);
+};
+
+const activateTeacher = async (req, res) => {
+  req.body = { ...(req.body || {}), status: STATUS.ACTIVE };
+  return updateTeacherStatus(req, res);
+};
+
+const getMyClasses = async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const teacher = await prisma.teacher.findFirst({
       where: {
-        teacherId: teacher.teacherId,
-        class: { schoolId },
+        userId,
+        schoolId,
+        isActive: true,
       },
+      select: { teacherId: true },
+    });
+
+    if (!teacher) {
+      return res.status(404).json({ success: false, error: 'Teacher record not found.' });
+    }
+
+    const taughtClasses = await prisma.classTeacher.findMany({
+      where: { teacherId: teacher.teacherId },
       include: {
         class: {
           include: {
-            homeroomTeacher: {
-              include: {
-                user: {
-                  select: {
-                    fullName: true,
-                  },
-                },
-              },
-            },
             _count: {
-              select: {
-                students: true,
-              },
+              select: { students: true },
             },
           },
         },
       },
     });
 
-    const taughtClasses = classAssignments.map((ca) => ({
-      ...ca.class,
-      subjectTaught: ca.subjectName,
-      isHomeroom: ca.class.homeroomTeacherId === teacher.teacherId,
-    }));
-
-    // ALSO include homeroom classes even if not assigned via classTeacher
     const homeroomClasses = await prisma.class.findMany({
       where: {
         schoolId,
@@ -513,216 +515,154 @@ const getMyClasses = async (req, res) => {
         isActive: true,
       },
       include: {
-        homeroomTeacher: {
-          include: {
-            user: {
-              select: {
-                fullName: true,
-              },
-            },
-          },
-        },
         _count: {
-          select: {
-            students: true,
-          },
+          select: { students: true },
         },
       },
-      orderBy: [{ gradeLevel: 'asc' }, { section: 'asc' }],
     });
 
-    // Merge + de-duplicate by classId (if teacher both teaches and is homeroom)
     const merged = new Map();
-    for (const c of taughtClasses) merged.set(c.classId, c);
-    for (const c of homeroomClasses) {
-      if (!merged.has(c.classId)) {
-        merged.set(c.classId, {
-          ...c,
+    for (const item of taughtClasses) {
+      merged.set(item.class.classId, {
+        ...item.class,
+        subjectTaught: item.subjectName || null,
+        isHomeroom: item.class.homeroomTeacherId === teacher.teacherId,
+      });
+    }
+    for (const item of homeroomClasses) {
+      if (!merged.has(item.classId)) {
+        merged.set(item.classId, {
+          ...item,
           subjectTaught: null,
           isHomeroom: true,
         });
       }
     }
 
-    const classes = Array.from(merged.values());
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      count: classes.length,
-      data: classes
+      count: merged.size,
+      data: Array.from(merged.values()),
     });
-
   } catch (error) {
     console.error('Get my classes error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch classes'
-    });
+    return sendError(res, error, 'Failed to fetch classes.');
   }
 };
 
-/**
- * @route   GET /api/teacher/classes/:classId/students
- * @desc    Get students in a class teacher teaches
- * @access  TEACHER
- */
 const getClassStudents = async (req, res) => {
   try {
-    const { classId } = req.params;
-    const { schoolId, userId: teacherUserId } = req.user;
+    const { schoolId, userId } = req.user;
+    const classId = parseInteger(req.params.classId, 'classId');
 
-    // Get teacher record
     const teacher = await prisma.teacher.findFirst({
       where: {
-        userId: teacherUserId,
-        schoolId
-      }
+        userId,
+        schoolId,
+        isActive: true,
+      },
+      select: { teacherId: true },
     });
 
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher record not found'
-      });
+      return res.status(404).json({ success: false, error: 'Teacher record not found.' });
     }
 
-    // Verify teacher has access: teaches via classTeacher OR is homeroom teacher
-    const classRow = await prisma.class.findFirst({
-      where: { classId: parseInt(classId), schoolId },
-      select: { classId: true, homeroomTeacherId: true },
+    const classRecord = await prisma.class.findFirst({
+      where: {
+        classId,
+        schoolId,
+      },
+      select: {
+        classId: true,
+        homeroomTeacherId: true,
+      },
     });
 
-    if (!classRow) {
-      return res.status(404).json({
-        success: false,
-        error: 'Class not found',
-      });
+    if (!classRecord) {
+      return res.status(404).json({ success: false, error: 'Class not found.' });
     }
 
-    const teachesClass = await prisma.classTeacher.findFirst({
+    const assignment = await prisma.classTeacher.findFirst({
       where: {
+        classId,
         teacherId: teacher.teacherId,
-        classId: parseInt(classId),
       },
       select: { id: true },
     });
 
-    const isHomeroom = classRow.homeroomTeacherId === teacher.teacherId;
-
-    if (!teachesClass && !isHomeroom) {
+    if (!assignment && classRecord.homeroomTeacherId !== teacher.teacherId) {
       return res.status(403).json({
         success: false,
-        error: 'You do not teach this class',
+        error: 'You do not have access to this class.',
       });
     }
 
-    // Get students
     const students = await prisma.student.findMany({
       where: {
-        classId: parseInt(classId),
         schoolId,
-        isActive: true
+        classId,
+        isActive: true,
       },
       include: {
         user: {
           select: {
             userId: true,
             fullName: true,
-          }
-        }
+            username: true,
+            status: true,
+          },
+        },
       },
-      // NOTE: ordering by nested relation fields can break on some Prisma/MySQL setups.
-      // Keep a stable order here; UI can sort if needed.
-      orderBy: { studentId: 'asc' }
+      orderBy: { studentId: 'asc' },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: students.length,
-      data: students
+      data: students,
     });
-
   } catch (error) {
-    console.error('Get class students error:', { error, classId: req.params.classId, schoolId: req.user?.schoolId, userId: req.user?.userId });
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch students',
-      details: error?.message
-    });
+    console.error('Get class students error:', error);
+    return sendError(res, error, 'Failed to fetch students.');
   }
 };
 
-/**
- * @route   GET /api/teacher/profile
- * @desc    Get teacher's own profile
- * @access  TEACHER
- */
 const getMyProfile = async (req, res) => {
   try {
-    const { schoolId, userId: teacherUserId } = req.user;
-
+    const { schoolId, userId } = req.user;
     const teacher = await prisma.teacher.findFirst({
       where: {
-        userId: teacherUserId,
-        schoolId
+        userId,
+        schoolId,
       },
-      include: {
-        user: true,
-        school: {
-          select: {
-            schoolId: true,
-            schoolName: true,
-            schoolCode: true
-          }
-        },
-        _count: {
-          select: {
-            classTeachers: true,
-            homeroomClasses: true
-          }
-        }
-      }
+      include: buildTeacherInclude(),
     });
 
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        error: 'Teacher record not found'
-      });
+      return res.status(404).json({ success: false, error: 'Teacher record not found.' });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      data: teacher
+      data: teacher,
     });
-
   } catch (error) {
-    console.error('Get profile error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch profile'
-    });
+    console.error('Get teacher profile error:', error);
+    return sendError(res, error, 'Failed to fetch profile.');
   }
 };
 
-/**
- * @route   GET /api/teacher/my-attendance
- * @desc    Get teacher attendance history (self)
- * @access  TEACHER
- * Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
- */
 const getMyAttendance = async (req, res) => {
   try {
-    const { schoolId, userId: teacherUserId } = req.user;
-    const { startDate, endDate } = req.query;
-
+    const { schoolId, userId } = req.user;
     const teacher = await prisma.teacher.findFirst({
-      where: { userId: teacherUserId, schoolId },
+      where: { userId, schoolId },
       select: { teacherId: true },
     });
 
     if (!teacher) {
-      return res.status(404).json({ success: false, error: 'Teacher record not found' });
+      return res.status(404).json({ success: false, error: 'Teacher record not found.' });
     }
 
     const where = {
@@ -730,10 +670,10 @@ const getMyAttendance = async (req, res) => {
       teacherId: teacher.teacherId,
     };
 
-    if (startDate || endDate) {
+    if (req.query.startDate || req.query.endDate) {
       where.attendanceDate = {};
-      if (startDate) where.attendanceDate.gte = new Date(startDate);
-      if (endDate) where.attendanceDate.lte = new Date(endDate);
+      if (req.query.startDate) where.attendanceDate.gte = new Date(req.query.startDate);
+      if (req.query.endDate) where.attendanceDate.lte = new Date(req.query.endDate);
     }
 
     const records = await prisma.teacherAttendance.findMany({
@@ -747,19 +687,22 @@ const getMyAttendance = async (req, res) => {
       data: records,
     });
   } catch (error) {
-    console.error('Get my teacher attendance error:', error);
-    return res.status(500).json({ success: false, error: 'Failed to fetch attendance history' });
+    console.error('Get my attendance error:', error);
+    return sendError(res, error, 'Failed to fetch attendance history.');
   }
 };
 
 module.exports = {
+  activateTeacher,
   createTeacher,
+  deactivateTeacher,
+  deleteTeacher,
   getAllTeachers,
+  getClassStudents,
+  getMyAttendance,
+  getMyClasses,
+  getMyProfile,
   getTeacherById,
   updateTeacher,
-  deactivateTeacher,
-  getMyClasses,
-  getClassStudents,
-  getMyProfile,
-  getMyAttendance
+  updateTeacherStatus,
 };

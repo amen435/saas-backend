@@ -1,40 +1,89 @@
-// src/routes/teacher.routes.js
-
 const express = require('express');
-const router = express.Router();
 const teacherController = require('../controllers/teacher.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
-const { requireRole } = require('../middleware/rbac.middleware');
+const { authorizeRoles, requireAnyPermission } = require('../middleware/rbac.middleware');
+const { auditAuthorizedAccess } = require('../middleware/auditAccess.middleware');
+const { validateBody, validateParams } = require('../middleware/validate.middleware');
+const {
+  createTeacherSchema,
+  updateTeacherSchema,
+  idParamSchema,
+} = require('../validation/teacher.validation');
 
-// All routes require TEACHER authentication
+const router = express.Router();
+
 router.use(authenticateToken);
-router.use(requireRole(['TEACHER', 'HOMEROOM_TEACHER']));
 
-/**
- * @route   GET /api/teacher/my-classes
- * @desc    Get classes the teacher is assigned to
- * @access  TEACHER
- */
-router.get('/my-classes', teacherController.getMyClasses);
+router.get(
+  '/',
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:read']),
+  auditAuthorizedAccess('teachers.read.list'),
+  teacherController.getAllTeachers
+);
 
-/**
- * @route   GET /api/teacher/classes/:classId/students
- * @desc    Get students in a class teacher teaches
- * @access  TEACHER
- */
-router.get('/classes/:classId/students', teacherController.getClassStudents);
+router.get(
+  '/:id',
+  validateParams(idParamSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:read']),
+  auditAuthorizedAccess('teachers.read.single'),
+  teacherController.getTeacherById
+);
 
-/**
- * @route   GET /api/teacher/profile
- * @desc    Get teacher's own profile
- * @access  TEACHER
- */
-router.get('/profile', teacherController.getMyProfile);
+router.post(
+  '/',
+  validateBody(createTeacherSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:write']),
+  auditAuthorizedAccess('teachers.write.create'),
+  teacherController.createTeacher
+);
 
-// TODO: Add homework routes here
-// router.post('/classes/:classId/homework', teacherController.createHomework);
+router.put(
+  '/:id',
+  validateParams(idParamSchema),
+  validateBody(updateTeacherSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:write']),
+  auditAuthorizedAccess('teachers.write.update'),
+  teacherController.updateTeacher
+);
 
-// TODO: Add grading routes here
-// router.post('/classes/:classId/grades', teacherController.giveGrades);
+router.patch(
+  '/:id/deactivate',
+  validateParams(idParamSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:write']),
+  auditAuthorizedAccess('teachers.write.deactivate'),
+  teacherController.deactivateTeacher
+);
+
+router.patch(
+  '/:id/activate',
+  validateParams(idParamSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:write']),
+  auditAuthorizedAccess('teachers.write.activate'),
+  teacherController.activateTeacher
+);
+
+router.patch(
+  '/:id/status',
+  validateParams(idParamSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:write']),
+  auditAuthorizedAccess('teachers.write.status'),
+  teacherController.updateTeacherStatus
+);
+
+router.delete(
+  '/:id',
+  validateParams(idParamSchema),
+  authorizeRoles('SUPER_ADMIN', 'SCHOOL_ADMIN'),
+  requireAnyPermission(['users:write']),
+  auditAuthorizedAccess('teachers.write.delete'),
+  teacherController.deleteTeacher
+);
 
 module.exports = router;

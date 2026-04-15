@@ -38,9 +38,15 @@ router.get('/:teacherId', requireAnyPermission(['users:read']), auditAuthorizedA
 router.put('/:teacherId', requireAnyPermission(['users:write']), auditAuthorizedAccess('admin_teachers.write.update'), teacherController.updateTeacher);
 
 /**
- * @route   PATCH /api/admin/teachers/:teacherId/deactivate
- * @desc    Deactivate teacher (School Admin)
+ * @route   PATCH /api/admin/teachers/:teacherId/status
+ * @desc    Update teacher status (School Admin)
  */
-router.patch('/:teacherId/deactivate', requireAnyPermission(['users:write']), auditAuthorizedAccess('admin_teachers.write.deactivate'), teacherController.deactivateTeacher);
+router.patch('/:teacherId/status', requireAnyPermission(['users:write']), auditAuthorizedAccess('admin_teachers.write.status'), teacherController.updateTeacherStatus);
+
+/**
+ * @route   DELETE /api/admin/teachers/:teacherId
+ * @desc    Delete teacher (School Admin)
+ */
+router.delete('/:teacherId', requireAnyPermission(['users:write']), auditAuthorizedAccess('admin_teachers.write.delete'), teacherController.deleteTeacher);
 
 module.exports = router;

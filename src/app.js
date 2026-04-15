@@ -16,6 +16,7 @@ const profileRoutes = require('./routes/profile.routes');
 const classRoutes = require('./routes/class.routes');
 const adminTeacherRoutes = require('./routes/admin.teacher.routes');
 const adminStudentRoutes = require('./routes/admin.student.routes');
+const teacherManagementRoutes = require('./routes/teacher.routes');
 const normalTeacherRoutes = require('./routes/teacher.normal.routes');
 const homeroomTeacherRoutes = require('./routes/homeroom.routes');
 const subjectRoutes = require('./routes/subject.routes');
@@ -28,6 +29,8 @@ const timetableRoutes = require('./routes/timetable.routes');
 const timetableViewRoutes = require('./routes/timetableView.routes');
 const studentMeRoutes = require('./routes/studentMe.routes');
 const parentMeRoutes = require('./routes/parentMe.routes');
+const deviceRoutes = require('./routes/device.routes');
+const reportCardRoutes = require('./routes/reportCard.routes');
 const aiChatRoutes = require('./ai/routes/aiChat.routes');
 const aiHomeworkRoutes = require('./ai/routes/aiHomework.routes');
 const aiAnalyticsRoutes = require('./ai/routes/aiAnalytics.routes');
@@ -197,6 +200,7 @@ app.use('/api/classes', classRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/admin/teachers', adminTeacherRoutes);
 app.use('/api/admin/students', adminStudentRoutes);
+app.use('/api/teachers', teacherManagementRoutes);
 app.use('/api/teacher', normalTeacherRoutes);
 app.use('/api/homeroom', homeroomTeacherRoutes);
 app.use('/api/teacher-attendance', teacherAttendanceRoutes);
@@ -206,8 +210,10 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/timetable', timetableRoutes);
 app.use('/api/timetable/view', timetableViewRoutes);
+app.use('/api/devices', deviceRoutes);
 app.use('/api/parents', parentMeRoutes);
 app.use('/api/students', studentMeRoutes);
+app.use('/api/report-cards', reportCardRoutes);
 app.use('/api/ai/chat', aiChatRoutes);
 app.use('/api/ai/homework', aiHomeworkRoutes);
 app.use('/api/ai/analytics', aiAnalyticsRoutes);
@@ -241,8 +247,15 @@ app.use((err, req, res, next) => {
     return res.status(403).json({ success: false, error: err.message });
   }
 
+  const statusCode = Number(err?.statusCode) || 500;
+  const message = statusCode >= 500 ? 'Internal server error' : err?.message || 'Request failed.';
+
   console.error('Unhandled error:', err?.message || err);
-  return res.status(500).json({ success: false, error: 'Internal server error' });
+  return res.status(statusCode).json({
+    success: false,
+    error: message,
+    ...(Array.isArray(err?.details) ? { details: err.details } : {}),
+  });
 });
 
 module.exports = app;

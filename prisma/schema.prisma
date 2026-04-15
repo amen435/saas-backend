@@ -22,6 +22,11 @@ enum UserRole {
   PARENT
 }
 
+enum Status {
+  ACTIVE
+  INACTIVE
+}
+
 // ============================================
 // SUBJECTS (NEW!)
 // ============================================
@@ -209,6 +214,8 @@ model School {
   grades              Grade[]
   attendance          Attendance[]
   teacherAttendance   TeacherAttendance[]
+  devices             Device[]
+  alerts              Alert[]
   messages            Message[]
   announcements       Announcement[]
   timetable           Timetable[]
@@ -234,6 +241,7 @@ model User {
   email          String?   @unique @db.VarChar(100)
   passwordHash   String    @db.VarChar(255)
   role           UserRole
+  status         Status    @default(ACTIVE)
   schoolId       Int?
   fullName       String    @db.VarChar(200)
   profileImage   String?   @db.VarChar(500)
@@ -256,6 +264,7 @@ model User {
   announcements             Announcement[]
   timetable                 Timetable[]
   aiChatHistory             AiChatHistory[]
+  alerts                    Alert[]
 
   @@index([schoolId])
   @@index([role])
@@ -324,12 +333,16 @@ model Student {
   userId         String    @unique @db.VarChar(50)
   schoolId       Int
   classId        Int
+  status         Status    @default(ACTIVE)
   studentCode    String?   @unique @db.VarChar(50) // Optional student code
   dateOfBirth    DateTime?
   gender         String?   @db.VarChar(10) // Male, Female
   guardianName   String?   @db.VarChar(200)
   guardianPhone  String?   @db.VarChar(20)
   address        String?   @db.Text
+  photoUrl       String?   @db.VarChar(500)
+  photoBase64    String?   @db.Text
+  faceEmbedding  Float[]
   enrollmentDate DateTime  @default(now())
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
@@ -360,8 +373,12 @@ model TeacherAttendance {
   teacherAttendanceId Int              @id @default(autoincrement())
   teacherId           Int
   schoolId            Int
+  classId             Int?
+  timetableId         Int?
   attendanceDate      DateTime         @db.Date
   status              AttendanceStatus
+  method              AttendanceMethod?
+  similarityScore     Float?
   remarks             String?          @db.Text
   recordedBy          String           @db.VarChar(50) // School Admin userId
   recordedAt          DateTime         @default(now())
@@ -370,12 +387,17 @@ model TeacherAttendance {
   // Relations
   teacher  Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
   school   School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  class    Class?  @relation(fields: [classId], references: [classId], onDelete: SetNull)
+  timetable Timetable? @relation(fields: [timetableId], references: [timetableId], onDelete: SetNull)
   recorder User    @relation(fields: [recordedBy], references: [userId])
 
   // Unique constraint: one record per teacher per date
   @@unique([teacherId, attendanceDate])
+  @@unique([teacherId, timetableId])
   @@index([teacherId])
   @@index([schoolId])
+  @@index([classId])
+  @@index([timetableId])
   @@index([attendanceDate])
   @@index([status])
   @@map("teacher_attendance")
@@ -391,8 +413,11 @@ model Attendance {
   classId        Int
   schoolId       Int
   teacherId      Int // Teacher who recorded attendance
+  timetableId    Int?
   attendanceDate DateTime         @db.Date
   status         AttendanceStatus
+  method         AttendanceMethod?
+  similarityScore Float?
   remarks        String?          @db.Text
   recordedAt     DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -402,13 +427,16 @@ model Attendance {
   class   Class   @relation(fields: [classId], references: [classId], onDelete: Cascade)
   school  School  @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
   teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
+  timetable Timetable? @relation(fields: [timetableId], references: [timetableId], onDelete: SetNull)
 
   // Unique constraint: one record per student per date per class
   @@unique([studentId, classId, attendanceDate])
+  @@unique([studentId, timetableId])
   @@index([studentId])
   @@index([classId])
   @@index([schoolId])
   @@index([teacherId])
+  @@index([timetableId])
   @@index([attendanceDate])
   @@index([status])
   @@map("attendance")
@@ -422,6 +450,22 @@ enum AttendanceStatus {
   PRESENT
   ABSENT
   LATE
+}
+
+enum AttendanceMethod {
+  WEBCAM
+  ESP32_CAM
+}
+
+enum DeviceType {
+  WEBCAM
+  ESP32_CAM
+}
+
+enum AlertType {
+  WRONG_CLASS
+  UNAUTHORIZED_TEACHER
+  UNKNOWN_PERSON
 }
 
 // ============================================
@@ -468,7 +512,12 @@ model Teacher {
   teacherId      Int      @id @default(autoincrement())
   userId         String   @unique @db.VarChar(50)
   schoolId       Int
+  status         Status   @default(ACTIVE)
   specialization String?  @db.VarChar(100)
+  classId        Int?
+  photoUrl       String?  @db.VarChar(500)
+  photoBase64    String?  @db.Text
+  faceEmbedding  Float[]
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -519,8 +568,11 @@ model Class {
   studentGrades   StudentGrade[]
   grades          Grade[]
   attendance      Attendance[]
+  teacherAttendance TeacherAttendance[]
   timetable       Timetable[]
   aiHomework      AiHomework[]
+  devices         Device[]
+  alerts          Alert[]
 
   @@unique([schoolId, gradeLevel, section, academicYear])
   @@index([schoolId])
@@ -641,6 +693,8 @@ model Timetable {
   subject Subject @relation(fields: [subjectId], references: [subjectId], onDelete: Cascade)
   teacher Teacher @relation(fields: [teacherId], references: [teacherId], onDelete: Cascade)
   creator User    @relation(fields: [createdBy], references: [userId])
+  studentAttendance Attendance[]
+  teacherAttendance TeacherAttendance[]
 
   @@unique([schoolId, classId, dayOfWeek, periodNumber, academicYear])
   @@index([schoolId])
@@ -816,6 +870,50 @@ model AiAnalyticsCache {
   @@index([analysisType])
   @@index([expiresAt])
   @@map("ai_analytics_cache")
+}
+
+model Device {
+  devicePk   Int        @id @default(autoincrement())
+  deviceId   String     @unique @db.VarChar(100)
+  deviceType DeviceType
+  classId    Int
+  schoolId   Int
+  location   String?    @db.VarChar(200)
+  isActive   Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  class      Class      @relation(fields: [classId], references: [classId], onDelete: Cascade)
+  school     School     @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([classId])
+  @@index([isActive])
+  @@map("devices")
+}
+
+model Alert {
+  alertId    Int        @id @default(autoincrement())
+  schoolId   Int
+  userId     String?    @db.VarChar(50)
+  classId    Int?
+  type       AlertType
+  message    String     @db.Text
+  timestamp  DateTime   @default(now())
+  resolved   Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  school     School     @relation(fields: [schoolId], references: [schoolId], onDelete: Cascade)
+  user       User?      @relation(fields: [userId], references: [userId], onDelete: SetNull)
+  class      Class?     @relation(fields: [classId], references: [classId], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([userId])
+  @@index([classId])
+  @@index([type])
+  @@index([resolved])
+  @@map("alerts")
 }
 
 // ============================================

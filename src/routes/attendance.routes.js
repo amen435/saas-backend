@@ -11,9 +11,41 @@ const {
 } = require('../middleware/ownership.middleware');
 const { auditAuthorizedAccess } = require('../middleware/auditAccess.middleware');
 const { ensureTeacherAssignedClass } = require('../middleware/assignment.middleware');
+const { validateBody } = require('../middleware/validate.middleware');
+const { recognizeAttendanceSchema } = require('../validation/attendanceRecognition.validation');
+
+router.post(
+  '/recognize',
+  validateBody(recognizeAttendanceSchema),
+  attendanceController.recognizeAttendance
+);
 
 // All routes require authentication
 router.use(authenticateToken);
+
+router.get(
+  '/summary',
+  requireAnyPermission(['attendance:read', 'school:manage']),
+  requireRole(['SCHOOL_ADMIN', 'SUPER_ADMIN']),
+  auditAuthorizedAccess('attendance.read.summary'),
+  attendanceController.getSchoolWideAttendanceSummary
+);
+
+router.get(
+  '/alerts',
+  requireAnyPermission(['attendance:read', 'attendance:read:child', 'school:manage']),
+  requireRole(['SCHOOL_ADMIN', 'SUPER_ADMIN', 'PARENT']),
+  auditAuthorizedAccess('attendance.read.alerts'),
+  attendanceController.getAttendanceAlerts
+);
+
+router.get(
+  '/',
+  requireAnyPermission(['attendance:read', 'school:manage']),
+  requireRole(['SCHOOL_ADMIN', 'SUPER_ADMIN']),
+  auditAuthorizedAccess('attendance.read.all'),
+  attendanceController.getAllAttendance
+);
 
 /**
  * Record Attendance
@@ -87,4 +119,3 @@ router.delete(
 );
 
 module.exports = router;
-

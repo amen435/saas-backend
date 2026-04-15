@@ -1,0 +1,5 @@
+ALTER TABLE "students"
+  ADD COLUMN IF NOT EXISTS "photoUrl" VARCHAR(500);
+
+ALTER TABLE "teachers"
+  ADD COLUMN IF NOT EXISTS "photoUrl" VARCHAR(500);

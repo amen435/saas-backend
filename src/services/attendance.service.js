@@ -4,6 +4,330 @@ const prisma = require('../config/database');
 const { formatDate } = require('../utils/attendanceValidation');
 
 class AttendanceService {
+  resolveDateOnly(dateInput) {
+    const target = dateInput ? new Date(dateInput) : new Date();
+    if (Number.isNaN(target.getTime())) {
+      throw new Error('Invalid date');
+    }
+    return new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  }
+
+  async getSchoolAttendanceSummary({ schoolId, date, classId, role } = {}) {
+    const attendanceDate = this.resolveDateOnly(date);
+    const normalizedRole = String(role || 'ALL').trim().toUpperCase();
+    const classFilter = classId ? Number.parseInt(classId, 10) : null;
+
+    const studentWhere = {
+      schoolId,
+      attendanceDate,
+      ...(classFilter ? { classId: classFilter } : {}),
+    };
+
+    const teacherWhere = {
+      schoolId,
+      attendanceDate,
+      ...(classFilter ? { classId: classFilter } : {}),
+    };
+
+    const [studentRecords, teacherRecords, alerts] = await Promise.all([
+      normalizedRole === 'TEACHER' ? [] : prisma.attendance.findMany({ where: studentWhere }),
+      normalizedRole === 'STUDENT' ? [] : prisma.teacherAttendance.findMany({ where: teacherWhere }),
+      prisma.alert.count({
+        where: {
+          schoolId,
+          ...(classFilter ? { classId: classFilter } : {}),
+          timestamp: {
+            gte: attendanceDate,
+            lt: new Date(attendanceDate.getTime() + 24 * 60 * 60 * 1000),
+          },
+        },
+      }),
+    ]);
+
+    const combined = [...studentRecords, ...teacherRecords];
+    return {
+      total: combined.length,
+      present: combined.filter((item) => item.status === 'PRESENT').length,
+      absent: combined.filter((item) => item.status === 'ABSENT').length,
+      late: combined.filter((item) => item.status === 'LATE').length,
+      alerts,
+      date: attendanceDate.toISOString(),
+    };
+  }
+
+  async getSchoolAttendanceRecords({ schoolId, date, classId, role } = {}) {
+    const attendanceDate = this.resolveDateOnly(date);
+    const normalizedRole = String(role || 'ALL').trim().toUpperCase();
+    const classFilter = classId ? Number.parseInt(classId, 10) : null;
+
+    const [studentRecords, teacherRecords] = await Promise.all([
+      normalizedRole === 'TEACHER'
+        ? []
+        : prisma.attendance.findMany({
+            where: {
+              schoolId,
+              attendanceDate,
+              ...(classFilter ? { classId: classFilter } : {}),
+            },
+            include: {
+              student: {
+                include: {
+                  user: { select: { userId: true, fullName: true } },
+                  class: { select: { className: true } },
+                },
+              },
+              timetable: {
+                include: {
+                  subject: { select: { subjectName: true } },
+                },
+              },
+            },
+            orderBy: { recordedAt: 'desc' },
+          }),
+      normalizedRole === 'STUDENT'
+        ? []
+        : prisma.teacherAttendance.findMany({
+            where: {
+              schoolId,
+              attendanceDate,
+              ...(classFilter ? { classId: classFilter } : {}),
+            },
+            include: {
+              teacher: {
+                include: {
+                  user: { select: { userId: true, fullName: true } },
+                },
+              },
+              class: { select: { className: true } },
+              timetable: {
+                include: {
+                  subject: { select: { subjectName: true } },
+                },
+              },
+            },
+            orderBy: { recordedAt: 'desc' },
+          }),
+    ]);
+
+    const normalizedStudents = studentRecords.map((record) => ({
+      id: `student-${record.attendanceId}`,
+      name: record.student?.user?.fullName,
+      role: 'STUDENT',
+      class: record.student?.class?.className,
+      subject: record.timetable?.subject?.subjectName || null,
+      status: record.status,
+      time: record.recordedAt,
+      method: record.method || 'WEBCAM',
+      photoUrl: record.student?.photoUrl || null,
+      similarityScore: record.similarityScore,
+      timetableId: record.timetableId,
+    }));
+
+    const normalizedTeachers = teacherRecords.map((record) => ({
+      id: `teacher-${record.teacherAttendanceId}`,
+      name: record.teacher?.user?.fullName,
+      role: 'TEACHER',
+      class: record.class?.className || null,
+      subject: record.timetable?.subject?.subjectName || null,
+      status: record.status,
+      time: record.recordedAt,
+      method: record.method || 'WEBCAM',
+      photoUrl: record.teacher?.photoUrl || null,
+      similarityScore: record.similarityScore,
+      timetableId: record.timetableId,
+    }));
+
+    return [...normalizedStudents, ...normalizedTeachers].sort(
+      (left, right) => new Date(right.time).getTime() - new Date(left.time).getTime()
+    );
+  }
+
+  async getAlerts({ schoolId, date, classId, studentId } = {}) {
+    const classFilter = classId ? Number.parseInt(classId, 10) : null;
+    const studentFilter = studentId ? Number.parseInt(studentId, 10) : null;
+    const alertDate = date ? this.resolveDateOnly(date) : null;
+
+    const alerts = await prisma.alert.findMany({
+      where: {
+        schoolId,
+        ...(classFilter ? { classId: classFilter } : {}),
+        ...(alertDate
+          ? {
+              timestamp: {
+                gte: alertDate,
+                lt: new Date(alertDate.getTime() + 24 * 60 * 60 * 1000),
+              },
+            }
+          : {}),
+        ...(studentFilter
+          ? {
+              user: {
+                student: {
+                  studentId: studentFilter,
+                },
+              },
+            }
+          : {}),
+      },
+      include: {
+        user: {
+          select: {
+            fullName: true,
+            role: true,
+          },
+        },
+        class: {
+          select: {
+            classId: true,
+            className: true,
+          },
+        },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    return alerts.map((alert) => ({
+      ...alert,
+      id: alert.alertId,
+      name: alert.user?.fullName || 'Unknown person',
+      detectedClassroom: alert.class?.className || 'Unknown class',
+      expectedClass: alert.type === 'WRONG_CLASS' ? 'Assigned class mismatch' : null,
+    }));
+  }
+
+  async getParentAttendanceTimeline({ schoolId, userId, studentId, date }) {
+    const attendanceDate = this.resolveDateOnly(date);
+    const parent = await prisma.parent.findFirst({
+      where: { userId, schoolId, isActive: true },
+      select: { parentId: true },
+    });
+
+    if (!parent) {
+      throw new Error('Parent record not found');
+    }
+
+    const link = await prisma.parentStudent.findFirst({
+      where: {
+        parentId: parent.parentId,
+        studentId: Number.parseInt(studentId, 10),
+      },
+    });
+
+    if (!link) {
+      throw new Error('Student is not linked to this parent');
+    }
+
+    const student = await prisma.student.findFirst({
+      where: {
+        studentId: Number.parseInt(studentId, 10),
+        schoolId,
+      },
+      include: {
+        user: { select: { fullName: true } },
+        class: {
+          select: {
+            classId: true,
+            className: true,
+            academicYear: true,
+          },
+        },
+      },
+    });
+
+    if (!student) {
+      throw new Error('Student not found');
+    }
+
+    const weekday = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][attendanceDate.getDay()];
+
+    const [timetable, attendanceRecords, alerts, aggregateStats] = await Promise.all([
+      prisma.timetable.findMany({
+        where: {
+          schoolId,
+          classId: student.classId,
+          academicYear: student.class.academicYear,
+          dayOfWeek: weekday,
+          isActive: true,
+        },
+        include: {
+          subject: { select: { subjectName: true } },
+          teacher: {
+            include: {
+              user: { select: { fullName: true } },
+            },
+          },
+        },
+        orderBy: { periodNumber: 'asc' },
+      }),
+      prisma.attendance.findMany({
+        where: {
+          schoolId,
+          studentId: student.studentId,
+          attendanceDate,
+        },
+      }),
+      this.getAlerts({ schoolId, date: attendanceDate, studentId: student.studentId }),
+      this.getStudentAttendance(student.studentId, schoolId, {}),
+    ]);
+
+    const attendanceByTimetable = new Map(
+      attendanceRecords
+        .filter((record) => record.timetableId)
+        .map((record) => [record.timetableId, record])
+    );
+
+    const timeline = timetable.map((entry) => {
+      const attendance = attendanceByTimetable.get(entry.timetableId);
+      return {
+        periodNumber: entry.periodNumber,
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        subject: { name: entry.subject?.subjectName || 'Subject' },
+        teacher: { fullName: entry.teacher?.user?.fullName || 'Teacher' },
+        attendance: attendance
+          ? {
+              status: attendance.status,
+              method:
+                attendance.method === 'ESP32_CAM'
+                  ? 'Facial Recognition'
+                  : attendance.method === 'WEBCAM'
+                    ? 'System'
+                    : attendance.method,
+            }
+          : null,
+      };
+    });
+
+    const statistics = aggregateStats.statistics || { total: 0, present: 0, absent: 0, late: 0 };
+    const overallAttendance = statistics.total
+      ? Number(((Number(statistics.present || 0) / Number(statistics.total || 1)) * 100).toFixed(0))
+      : 0;
+
+    return {
+      student: {
+        fullName: student.user?.fullName,
+        class: {
+          className: student.class?.className,
+        },
+      },
+      statistics: {
+        ...statistics,
+        presentToday: attendanceRecords.filter((record) => record.status === 'PRESENT').length,
+        totalToday: timetable.length,
+        overallAttendance,
+      },
+      timeline,
+      alerts: alerts.map((alert) => ({
+        ...alert,
+        type:
+          alert.type === 'WRONG_CLASS'
+            ? 'ANOMALY'
+            : alert.type === 'UNKNOWN_PERSON'
+              ? 'MISSING'
+              : 'ANOMALY',
+      })),
+    };
+  }
   /**
    * Record attendance for a single student
    */

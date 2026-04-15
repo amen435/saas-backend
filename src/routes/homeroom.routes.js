@@ -52,18 +52,6 @@ router.get(
 );
 
 /**
- * @route   POST /api/homeroom/classes/:classId/students
- * @desc    Create student in homeroom class
- * @access  HOMEROOM_TEACHER (of this class)
- */
-router.post(
-  '/classes/:classId/students',
-  verifyHomeroomTeacher,
-  auditAuthorizedAccess('homeroom.students.write.create'),
-  homeroomController.createStudent
-);
-
-/**
  * @route   GET /api/homeroom/classes/:classId/students
  * @desc    Get students in homeroom class
  * @access  HOMEROOM_TEACHER (of this class)
@@ -87,53 +75,6 @@ router.get(
   homeroomController.getStudentById
 );
 
-/**
- * @route   PUT /api/homeroom/students/:studentId
- * @desc    Update student basic info
- * @access  HOMEROOM_TEACHER (of student's class)
- */
-router.put(
-  '/students/:studentId',
-  verifyStudentInHomeroomClass,
-  auditAuthorizedAccess('homeroom.students.write.update'),
-  homeroomController.updateStudent
-);
-
-/**
- * @route   PATCH /api/homeroom/students/:studentId/deactivate
- * @desc    Deactivate student
- * @access  HOMEROOM_TEACHER (of student's class)
- */
-router.patch(
-  '/students/:studentId/deactivate',
-  verifyStudentInHomeroomClass,
-  auditAuthorizedAccess('homeroom.students.write.deactivate'),
-  homeroomController.deactivateStudent
-);
-
-/**
- * @route   PATCH /api/homeroom/students/:studentId/activate
- * @desc    Activate student
- * @access  HOMEROOM_TEACHER
- */
-router.patch(
-  '/students/:studentId/activate',
-  verifyStudentInHomeroomClass,
-  auditAuthorizedAccess('homeroom.students.write.activate'),
-  homeroomController.activateStudent
-);
-
-/**
- * @route   DELETE /api/homeroom/students/:studentId
- * @desc    Delete student account (hard delete)
- * @access  HOMEROOM_TEACHER
- */
-router.delete(
-  '/students/:studentId',
-  verifyStudentInHomeroomClass,
-  auditAuthorizedAccess('homeroom.students.write.delete'),
-  homeroomController.deleteStudent
-);
 // ============================================
 // PARENT ROUTES
 // ============================================
