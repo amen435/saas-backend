@@ -24,6 +24,10 @@ FACE_API_KEY = os.getenv("FACE_API_KEY", "").strip()
 FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "buffalo_s").strip() or "buffalo_s"
 FACE_DET_SIZE = int(os.getenv("FACE_DET_SIZE", "320"))
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes", "on")
+FACE_MODEL_ROOT = os.getenv(
+    "FACE_MODEL_ROOT",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
+).strip()
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -33,6 +37,16 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app_face = None
 app_face_lock = threading.Lock()
+
+
+def resolve_face_model_root():
+    model_dir = os.path.join(FACE_MODEL_ROOT, FACE_MODEL_NAME)
+    if os.path.isdir(model_dir):
+        logger.info("Using bundled InsightFace model from %s", model_dir)
+        return FACE_MODEL_ROOT
+
+    logger.warning("Bundled InsightFace model not found at %s; falling back to default download root", model_dir)
+    return None
 
 
 def get_face_app():
@@ -45,7 +59,12 @@ def get_face_app():
             return app_face
 
         logger.info("Initializing FaceAnalysis with model=%s det_size=%s", FACE_MODEL_NAME, FACE_DET_SIZE)
-        face_app = FaceAnalysis(name=FACE_MODEL_NAME, providers=["CPUExecutionProvider"])
+        model_root = resolve_face_model_root()
+        face_app = FaceAnalysis(
+            name=FACE_MODEL_NAME,
+            root=model_root,
+            providers=["CPUExecutionProvider"],
+        )
         face_app.prepare(ctx_id=0, det_size=(FACE_DET_SIZE, FACE_DET_SIZE))
         app_face = face_app
         logger.info("FaceAnalysis ready")
