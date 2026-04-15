@@ -1,3 +1,12 @@
+import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("MPLBACKEND", "Agg")
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+
 from flask import Flask, Response, jsonify, request
 import base64
 import cv2
@@ -5,7 +14,7 @@ import datetime
 from insightface.app import FaceAnalysis
 import logging
 import numpy as np
-import os
+import threading
 import time
 
 
@@ -21,16 +30,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-try:
-    app_face = FaceAnalysis(name=FACE_MODEL_NAME, providers=["CPUExecutionProvider"])
-    app_face.prepare(ctx_id=0, det_size=(FACE_DET_SIZE, FACE_DET_SIZE))
-    logger.info("FaceAnalysis initialized with model=%s det_size=%s", FACE_MODEL_NAME, FACE_DET_SIZE)
-except Exception as error:
-    logger.error("FaceAnalysis initialization failed: %s", error)
-    raise
-
-
 app = Flask(__name__)
+app_face = None
+app_face_lock = threading.Lock()
+
+
+def get_face_app():
+    global app_face
+    if app_face is not None:
+        return app_face
+
+    with app_face_lock:
+        if app_face is not None:
+            return app_face
+
+        logger.info("Initializing FaceAnalysis with model=%s det_size=%s", FACE_MODEL_NAME, FACE_DET_SIZE)
+        face_app = FaceAnalysis(name=FACE_MODEL_NAME, providers=["CPUExecutionProvider"])
+        face_app.prepare(ctx_id=0, det_size=(FACE_DET_SIZE, FACE_DET_SIZE))
+        app_face = face_app
+        logger.info("FaceAnalysis ready")
+        return app_face
 
 
 def require_face_api_key():
@@ -66,7 +85,7 @@ def decode_base64_image(image_base64):
 
 def extract_single_face_embedding(image_base64):
     image = decode_base64_image(image_base64)
-    faces = app_face.get(image)
+    faces = get_face_app().get(image)
 
     if len(faces) == 0:
         raise ValueError("No face detected in the provided image.")
@@ -112,7 +131,7 @@ def annotate_frame(frame, faces, label):
 
 def evaluate_frame(frame):
     global current_name
-    faces = app_face.get(frame)
+    faces = get_face_app().get(frame)
 
     if len(faces) == 0:
         current_name = "No Face"
@@ -204,6 +223,7 @@ def health_check():
         "service": "face-service",
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "cameraSource": "pc",
+        "modelLoaded": app_face is not None,
     })
 
 
