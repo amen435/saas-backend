@@ -1,5 +1,9 @@
 const crypto = require('crypto');
 
+function createUploadError(message, statusCode) {
+  return Object.assign(new Error(message), { statusCode });
+}
+
 function inferImageExtension(imageBase64) {
   const raw = String(imageBase64 || '').trim().toLowerCase();
   if (raw.startsWith('data:image/png')) return 'png';
@@ -11,7 +15,7 @@ function inferImageExtension(imageBase64) {
 function ensureDataUri(imageBase64) {
   const raw = String(imageBase64 || '').trim();
   if (!raw) {
-    throw new Error('Image is required for upload.');
+    throw createUploadError('Image is required for upload.', 400);
   }
 
   if (raw.startsWith('data:image/')) {
@@ -76,10 +80,15 @@ async function uploadToCloudinary({ imageBase64, entity, identifier }) {
   formData.append('public_id', publicId);
   formData.append('signature', signature);
 
-  const response = await fetch(`https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`, {
-    method: 'POST',
-    body: formData,
-  });
+  let response;
+  try {
+    response = await fetch(`https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+  } catch (error) {
+    throw createUploadError('Cloudinary upload service is unavailable.', 502);
+  }
 
   let payload = null;
   try {
@@ -89,7 +98,8 @@ async function uploadToCloudinary({ imageBase64, entity, identifier }) {
   }
 
   if (!response.ok) {
-    throw new Error(payload?.error?.message || `Cloudinary upload failed with status ${response.status}`);
+    const statusCode = response.status >= 400 && response.status < 500 ? response.status : 502;
+    throw createUploadError(payload?.error?.message || `Cloudinary upload failed with status ${response.status}`, statusCode);
   }
 
   return {
@@ -101,7 +111,7 @@ async function uploadToCloudinary({ imageBase64, entity, identifier }) {
 async function uploadImage({ imageBase64, entity, identifier }) {
   const raw = String(imageBase64 || '').trim();
   if (!raw) {
-    throw new Error('Image is required for upload.');
+    throw createUploadError('Image is required for upload.', 400);
   }
 
   const cloudinaryResult = await uploadToCloudinary({ imageBase64: raw, entity, identifier });
