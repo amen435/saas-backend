@@ -37,12 +37,16 @@ def main():
             archive.extractall(extract_dir)
 
         extracted_model_dir = extract_dir / MODEL_NAME
-        if not extracted_model_dir.exists():
-            raise RuntimeError(f"Expected extracted model directory at {extracted_model_dir}")
+        if extracted_model_dir.exists():
+            source_dir = extracted_model_dir
+        elif any(extract_dir.iterdir()):
+            source_dir = extract_dir
+        else:
+            raise RuntimeError(f"No extracted model files found in {extract_dir}")
 
         if target_dir.exists():
             shutil.rmtree(target_dir)
-        shutil.copytree(extracted_model_dir, target_dir)
+        shutil.copytree(source_dir, target_dir)
 
     print(f"Model ready at {target_dir}")
 
