@@ -6,18 +6,11 @@ from insightface.app import FaceAnalysis
 import logging
 import numpy as np
 import os
-import requests
-import threading
 import time
-import urllib.request
 
 
 THRESHOLD = 0.7
-DEFAULT_ATTENDANCE_CAMERA_SOURCE = "esp32"
-IP_CAMERA_URL = os.getenv("IP_CAMERA_URL", "http://192.168.4.50/stream")
-ESP32_IP = os.getenv("ESP32_IP", "192.168.4.1")
-URL = f"http://{ESP32_IP}/time"
-ENABLE_ESP32_SYNC = os.getenv("ENABLE_ESP32_SYNC", "0").lower() in ("1", "true", "yes", "on")
+DEFAULT_ATTENDANCE_CAMERA_SOURCE = "pc"
 FACE_API_KEY = os.getenv("FACE_API_KEY", "").strip()
 FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "buffalo_s").strip() or "buffalo_s"
 FACE_DET_SIZE = int(os.getenv("FACE_DET_SIZE", "320"))
@@ -26,29 +19,6 @@ FLASK_DEBUG = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes", "on"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-def send_time():
-    """Continuously send current time to ESP32 every minute."""
-    last_minute = -1
-    while True:
-        try:
-            now = datetime.datetime.now()
-            if now.minute != last_minute:
-                time_str = now.strftime("%H:%M:%S")
-                response = requests.post(URL, data=time_str, timeout=5)
-                if response.status_code == 200:
-                    logger.info("ESP32 time sync ok: %s", time_str)
-                else:
-                    logger.warning("ESP32 time sync failed: %s %s", response.status_code, response.text)
-                last_minute = now.minute
-            time.sleep(1)
-        except requests.exceptions.RequestException as error:
-            logger.warning("ESP32 sync connection error: %s", error)
-            time.sleep(5)
-        except Exception as error:
-            logger.warning("ESP32 sync unexpected error: %s", error)
-            time.sleep(5)
 
 
 try:
@@ -159,37 +129,6 @@ def evaluate_frame(frame):
     return annotate_frame(frame, faces, label)
 
 
-def stream_esp32_frames():
-    while True:
-        try:
-            with urllib.request.urlopen(IP_CAMERA_URL, timeout=5) as stream:
-                bytes_data = b""
-                while True:
-                    bytes_data += stream.read(1024)
-                    start = bytes_data.find(b"\xff\xd8")
-                    end = bytes_data.find(b"\xff\xd9")
-                    if start != -1 and end != -1:
-                        jpg = bytes_data[start:end + 2]
-                        bytes_data = bytes_data[end + 2:]
-                        frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
-                        if frame is None:
-                            continue
-
-                        frame = evaluate_frame(frame)
-                        success, buffer = cv2.imencode(".jpg", frame)
-                        if not success:
-                            continue
-
-                        yield (
-                            b"--frame\r\n"
-                            b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
-                        )
-                        break
-        except Exception as error:
-            logger.warning("ESP32 frame stream error: %s", error)
-            time.sleep(1)
-
-
 def open_pc_camera():
     backends = []
     if hasattr(cv2, "CAP_DSHOW"):
@@ -244,7 +183,7 @@ def stream_pc_frames():
 def get_attendance_camera_source():
     global attendance_camera_source
     source = request.args.get("source")
-    if source in ("esp32", "pc"):
+    if source == "pc":
         attendance_camera_source = source
     return attendance_camera_source
 
@@ -264,7 +203,7 @@ def health_check():
         "status": "ok",
         "service": "face-service",
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        "cameraSource": attendance_camera_source,
+        "cameraSource": "pc",
     })
 
 
@@ -308,7 +247,7 @@ def recognize_status():
 def set_attendance_camera_source():
     global attendance_camera_source
     source = request.json.get("source") if request.is_json else request.form.get("source")
-    if source not in ("esp32", "pc"):
+    if source != "pc":
         return jsonify({"status": "error", "message": "Invalid camera source"}), 400
 
     attendance_camera_source = source
@@ -319,14 +258,9 @@ def set_attendance_camera_source():
 def video_feed():
     global is_registration_mode
     is_registration_mode = False
-    source = get_attendance_camera_source()
-
-    if source == "pc":
-        logger.info("Starting PC webcam feed for attendance")
-        return Response(stream_pc_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
-    logger.info("Starting ESP32 video feed for attendance")
-    return Response(stream_esp32_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    get_attendance_camera_source()
+    logger.info("Starting PC webcam feed for attendance")
+    return Response(stream_pc_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/register_video_feed", methods=["GET"])
@@ -344,12 +278,6 @@ def stop_camera():
 
 
 if __name__ == "__main__":
-    if ENABLE_ESP32_SYNC:
-        threading.Thread(target=send_time, daemon=True).start()
-        logger.info("ESP32 time sync enabled")
-    else:
-        logger.info("ESP32 time sync disabled for local preview. Set ENABLE_ESP32_SYNC=1 to enable it.")
-
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
     logger.info("Starting Flask app")
