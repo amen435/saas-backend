@@ -60,10 +60,15 @@ def get_face_app():
 
         logger.info("Initializing FaceAnalysis with model=%s det_size=%s", FACE_MODEL_NAME, FACE_DET_SIZE)
         model_root = resolve_face_model_root()
-        face_app = FaceAnalysis(
+        face_app_config = dict(
             name=FACE_MODEL_NAME,
-            root=model_root,
             providers=["CPUExecutionProvider"],
+        )
+        if model_root:
+            face_app_config["root"] = model_root
+
+        face_app = FaceAnalysis(
+            **face_app_config,
         )
         face_app.prepare(ctx_id=0, det_size=(FACE_DET_SIZE, FACE_DET_SIZE))
         app_face = face_app
