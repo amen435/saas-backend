@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app_face = None
 app_face_lock = threading.Lock()
+app_face_error = None
+app_face_warmup_started = False
 
 
 def resolve_face_model_root():
@@ -50,7 +52,7 @@ def resolve_face_model_root():
 
 
 def get_face_app():
-    global app_face
+    global app_face, app_face_error
     if app_face is not None:
         return app_face
 
@@ -67,13 +69,37 @@ def get_face_app():
         if model_root:
             face_app_config["root"] = model_root
 
-        face_app = FaceAnalysis(
-            **face_app_config,
-        )
-        face_app.prepare(ctx_id=0, det_size=(FACE_DET_SIZE, FACE_DET_SIZE))
-        app_face = face_app
-        logger.info("FaceAnalysis ready")
-        return app_face
+        try:
+            face_app = FaceAnalysis(
+                **face_app_config,
+            )
+            face_app.prepare(ctx_id=0, det_size=(FACE_DET_SIZE, FACE_DET_SIZE))
+            app_face = face_app
+            app_face_error = None
+            logger.info("FaceAnalysis ready")
+            return app_face
+        except Exception as error:
+            app_face = None
+            app_face_error = str(error)
+            logger.exception("FaceAnalysis initialization failed")
+            raise
+
+
+def warm_face_app_async():
+    global app_face_warmup_started
+    if app_face_warmup_started:
+        return
+
+    app_face_warmup_started = True
+
+    def _warm():
+        try:
+            get_face_app()
+        except Exception:
+            logger.warning("Face model warmup failed; health endpoint will report the error.")
+
+    thread = threading.Thread(target=_warm, name="face-model-warmup", daemon=True)
+    thread.start()
 
 
 def require_face_api_key():
@@ -248,6 +274,7 @@ def health_check():
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "cameraSource": "pc",
         "modelLoaded": app_face is not None,
+        "modelError": app_face_error,
     })
 
 
@@ -319,6 +346,9 @@ def register_video_feed():
 def stop_camera():
     logger.info("Camera stop not required for streaming service")
     return jsonify({"status": "success", "message": "Camera stop not required"})
+
+
+warm_face_app_async()
 
 
 if __name__ == "__main__":

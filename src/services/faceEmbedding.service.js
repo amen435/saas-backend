@@ -1,4 +1,5 @@
 const EMBEDDING_ENDPOINT = '/generate-embedding';
+const HEALTH_ENDPOINT = '/health';
 
 function createServiceError(message, statusCode) {
   return Object.assign(new Error(message), { statusCode });
@@ -46,7 +47,27 @@ async function generateFaceEmbedding(photoBase64) {
   }
 
   if (!response.ok) {
-    const reason = payload?.error || payload?.message || `Embedding service failed with status ${response.status}`;
+    let reason = payload?.error || payload?.message || `Embedding service failed with status ${response.status}`;
+
+    if (response.status >= 500) {
+      try {
+        const healthResponse = await fetch(`${baseUrl}${HEALTH_ENDPOINT}`, {
+          headers: faceApiKey ? { 'x-api-key': faceApiKey } : {},
+        });
+        const healthPayload = await healthResponse.json().catch(() => null);
+        const modelLoaded = healthPayload?.modelLoaded;
+        const modelError = String(healthPayload?.modelError || '').trim();
+
+        if (modelLoaded === false) {
+          reason = modelError
+            ? `Face embedding service is online but the face model failed to load: ${modelError}`
+            : 'Face embedding service is online but the face model is not loaded yet.';
+        }
+      } catch {
+        // Ignore health probe failures and preserve the original upstream error.
+      }
+    }
+
     const statusCode = response.status >= 400 && response.status < 500 ? response.status : 502;
     throw createServiceError(reason, statusCode);
   }
