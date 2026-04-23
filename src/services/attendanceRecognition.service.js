@@ -69,16 +69,12 @@ function buildAttendanceResponse(record, timestamp) {
   };
 }
 
-class AttendanceRecognitionService {
-  async recognize(payload) {
-    const recognitionTime = payload.timestamp ? new Date(payload.timestamp) : new Date();
-    if (Number.isNaN(recognitionTime.getTime())) {
-      throw createHttpError(400, 'timestamp must be a valid ISO8601 value.');
-    }
-
+async function resolveRecognitionContext(payload) {
+  const rawDeviceId = String(payload.deviceId || '').trim();
+  if (rawDeviceId) {
     const device = await prisma.device.findFirst({
       where: {
-        deviceId: String(payload.deviceId).trim(),
+        deviceId: rawDeviceId,
         isActive: true,
       },
       include: {
@@ -95,6 +91,49 @@ class AttendanceRecognitionService {
     if (!device) {
       throw createHttpError(404, 'Active device not found.');
     }
+
+    return device;
+  }
+
+  const classId = Number.parseInt(String(payload.classId || ''), 10);
+  if (!Number.isInteger(classId) || classId <= 0) {
+    throw createHttpError(400, 'classId must be a valid positive integer.');
+  }
+
+  const classRecord = await prisma.class.findFirst({
+    where: {
+      classId,
+      isActive: true,
+    },
+    select: {
+      classId: true,
+      className: true,
+      academicYear: true,
+      schoolId: true,
+    },
+  });
+
+  if (!classRecord) {
+    throw createHttpError(404, 'Active class not found.');
+  }
+
+  return {
+    deviceId: `WEBCAM-CLASS-${classRecord.classId}`,
+    deviceType: 'WEBCAM',
+    schoolId: classRecord.schoolId,
+    classId: classRecord.classId,
+    class: classRecord,
+  };
+}
+
+class AttendanceRecognitionService {
+  async recognize(payload) {
+    const recognitionTime = payload.timestamp ? new Date(payload.timestamp) : new Date();
+    if (Number.isNaN(recognitionTime.getTime())) {
+      throw createHttpError(400, 'timestamp must be a valid ISO8601 value.');
+    }
+
+    const device = await resolveRecognitionContext(payload);
 
     const currentSlot = formatDateParts(recognitionTime);
     const currentTimetable = await prisma.timetable.findFirst({
