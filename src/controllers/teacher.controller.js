@@ -138,7 +138,7 @@ const createTeacher = async (req, res) => {
     });
 
     const status = normalizeStatusInput(payload.status ?? payload.isActive, STATUS.ACTIVE);
-    const sourceImage = payload.faceImageBase64 || payload.photoBase64;
+    const sourceImage = payload.faceImageBase64;
     const biometric = await generateFaceEmbedding(sourceImage);
     const upload = await uploadImage({
       imageBase64: sourceImage,
@@ -325,7 +325,7 @@ const updateTeacher = async (req, res) => {
       ? normalizeStatusInput(payload.status ?? payload.isActive, existingTeacher.status)
       : existingTeacher.status;
 
-    const sourceImage = payload.faceImageBase64 || payload.photoBase64;
+    const sourceImage = payload.faceImageBase64;
     const biometric = sourceImage
       ? await generateFaceEmbedding(sourceImage)
       : null;

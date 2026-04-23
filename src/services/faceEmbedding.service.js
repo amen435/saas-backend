@@ -15,8 +15,8 @@ function normalizeBase64Image(value) {
   return parts.length > 1 ? parts[parts.length - 1].trim() : raw;
 }
 
-async function generateFaceEmbedding(photoBase64) {
-  const imageBase64 = normalizeBase64Image(photoBase64);
+async function generateFaceEmbedding(faceImageBase64) {
+  const imageBase64 = normalizeBase64Image(faceImageBase64);
   if (!imageBase64) {
     throw createServiceError('Face image is required.', 400);
   }
@@ -78,7 +78,6 @@ async function generateFaceEmbedding(photoBase64) {
   }
 
   return {
-    photoBase64: imageBase64,
     faceEmbedding: embedding.map((value) => Number(value)),
   };
 }

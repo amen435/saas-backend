@@ -33,7 +33,6 @@ const studentPayloadSchema = z.object({
   guardianPhone: optionalNullableString,
   address: optionalNullableString,
   faceImageBase64: optionalImage,
-  photoBase64: optionalImage,
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
   isActive: z.boolean().optional(),
 }).passthrough();
@@ -62,11 +61,11 @@ const createStudentSchema = z.object({
     }
   }
 
-  if (!payload.faceImageBase64 && !payload.photoBase64) {
+  if (!payload.faceImageBase64) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['faceImageBase64'],
-      message: 'faceImageBase64 or photoBase64 is required.',
+      message: 'faceImageBase64 is required.',
     });
   }
 });

@@ -16,7 +16,6 @@ const teacherCreatePayloadSchema = z.object({
   specialization: optionalNullableString,
   classId: z.coerce.number().int().positive('classId must be a valid positive integer.').optional(),
   faceImageBase64: optionalImage,
-  photoBase64: optionalImage,
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
   isActive: z.boolean().optional(),
 }).passthrough();
@@ -33,11 +32,11 @@ const createTeacherSchema = z.object({}).passthrough().superRefine((data, ctx) =
     }
   }
 
-  if (!data.faceImageBase64 && !data.photoBase64) {
+  if (!data.faceImageBase64) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['faceImageBase64'],
-      message: 'faceImageBase64 or photoBase64 is required.',
+      message: 'faceImageBase64 is required.',
     });
   }
 });

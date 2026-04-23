@@ -281,7 +281,7 @@ const createStudent = async (req, res) => {
     }
 
     await ensureSchoolClass(classId, schoolId);
-    const sourceImage = payload.faceImageBase64 || payload.photoBase64;
+    const sourceImage = payload.faceImageBase64;
     const biometric = await generateFaceEmbedding(sourceImage);
     const upload = await uploadImage({
       imageBase64: sourceImage,
@@ -515,7 +515,7 @@ const updateStudent = async (req, res) => {
       ? normalizeStatusInput(payload.status ?? payload.isActive, existingStudent.status)
       : existingStudent.status;
 
-    const sourceImage = payload.faceImageBase64 || payload.photoBase64;
+    const sourceImage = payload.faceImageBase64;
     const biometric = sourceImage
       ? await generateFaceEmbedding(sourceImage)
       : null;
