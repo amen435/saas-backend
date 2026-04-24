@@ -5,6 +5,7 @@ const router = express.Router();
 const aiAnalyticsController = require('../controllers/aiAnalytics.controller');
 const { authenticateToken } = require('../../middleware/auth.middleware');
 const { requireRole } = require('../../middleware/rbac.middleware');
+const { checkOwnership, ensureStudentOwnsStudentParam, ensureParentOwnsStudentParam } = require('../../middleware/ownership.middleware');
 
 // All routes require authentication
 router.use(authenticateToken);
@@ -15,6 +16,7 @@ router.use(authenticateToken);
 router.get(
   '/student-performance/:studentId',
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'SCHOOL_ADMIN']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
   aiAnalyticsController.analyzeStudentPerformance
 );
 
@@ -24,6 +26,8 @@ router.get(
 router.get(
   '/attendance-trends/:studentId',
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'SCHOOL_ADMIN', 'PARENT']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
+  ensureParentOwnsStudentParam,
   aiAnalyticsController.analyzeAttendanceTrends
 );
 
@@ -33,6 +37,7 @@ router.get(
 router.get(
   '/at-risk-students/:classId',
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'SCHOOL_ADMIN']),
+  checkOwnership({ classIdSources: ['params.classId'] }),
   aiAnalyticsController.identifyAtRiskStudents
 );
 
@@ -42,6 +47,7 @@ router.get(
 router.get(
   '/class-performance/:classId',
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'SCHOOL_ADMIN']),
+  checkOwnership({ classIdSources: ['params.classId'] }),
   aiAnalyticsController.compareClassPerformance
 );
 
@@ -51,6 +57,9 @@ router.get(
 router.get(
   '/performance-trends/:studentId',
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'SCHOOL_ADMIN', 'STUDENT', 'PARENT']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
+  ensureStudentOwnsStudentParam,
+  ensureParentOwnsStudentParam,
   aiAnalyticsController.getPerformanceTrends
 );
 

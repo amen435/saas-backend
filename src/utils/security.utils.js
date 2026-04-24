@@ -70,6 +70,7 @@ const getCookieOptions = () => {
 };
 
 const generateCsrfToken = () => crypto.randomBytes(32).toString('hex');
+const generateSessionTokenId = () => crypto.randomUUID();
 
 module.exports = {
   AUTH_COOKIE_NAME,
@@ -79,4 +80,5 @@ module.exports = {
   serializeCookie,
   getCookieOptions,
   generateCsrfToken,
+  generateSessionTokenId,
 };

@@ -11,8 +11,10 @@ const {
   serializeCookie,
   getCookieOptions,
   generateCsrfToken,
+  generateSessionTokenId,
 } = require('../utils/security.utils');
 const { writeAudit } = require('../utils/auditLogger');
+const { validatePasswordStrength } = require('../utils/password.utils');
 
 const resolveUserClassId = (user) =>
   user?.student?.classId != null ? user.student.classId : null;
@@ -37,6 +39,44 @@ const buildUserPayload = async (user) => {
     roles,
   };
 };
+
+function buildTokenPayload(user, sessionVersion) {
+  return {
+    userId: user.userId,
+    role: user.role,
+    schoolId: user.schoolId,
+    classId: resolveUserClassId(user),
+    sessionVersion,
+    jti: generateSessionTokenId(),
+  };
+}
+
+function signAuthToken(tokenPayload) {
+  const expiresIn = String(process.env.JWT_EXPIRY || '1d').trim() || '1d';
+  return jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+    expiresIn,
+    issuer: 'intelligeschool-api',
+    audience: 'intelligeschool-client',
+  });
+}
+
+function setAuthCookies(res, token) {
+  const csrfToken = generateCsrfToken();
+  const cookieOptions = getCookieOptions();
+  res.setHeader('Set-Cookie', [
+    serializeCookie(AUTH_COOKIE_NAME, token, { ...cookieOptions.auth, encodeValue: false }),
+    serializeCookie(CSRF_COOKIE_NAME, csrfToken, { ...cookieOptions.csrf, encodeValue: false }),
+  ]);
+  return csrfToken;
+}
+
+function clearAuthCookies(res) {
+  const cookieOptions = getCookieOptions();
+  res.setHeader('Set-Cookie', [
+    serializeCookie(AUTH_COOKIE_NAME, '', { ...cookieOptions.auth, maxAge: 0, encodeValue: false }),
+    serializeCookie(CSRF_COOKIE_NAME, '', { ...cookieOptions.csrf, maxAge: 0, encodeValue: false }),
+  ]);
+}
 
 /**
  * @route   POST /api/auth/login
@@ -215,13 +255,20 @@ const login = async (req, res) => {
     // ============================================
     // 8. SUCCESSFUL LOGIN - RESET FAILED ATTEMPTS
     // ============================================
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { userId: user.userId },
       data: {
         failedAttempts: 0,
         lockedUntil: null,
-        lastLogin: new Date()
-      }
+        lastLogin: new Date(),
+        sessionVersion: {
+          increment: 1,
+        },
+        sessionRevokedAt: null,
+      },
+      select: {
+        sessionVersion: true,
+      },
     });
 
     // ============================================
@@ -236,21 +283,9 @@ const login = async (req, res) => {
     // ============================================
     // 10. GENERATE JWT TOKEN (base role only)
     // ============================================
-    const tokenPayload = {
-      userId: user.userId,
-      role: user.role,
-      schoolId: user.schoolId,
-      classId: resolveUserClassId(user),
-    };
-
-    const expiresIn = String(process.env.JWT_EXPIRY || '1d').trim() || '1d';
     let token;
     try {
-      token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
-        expiresIn,
-        issuer: 'intelligeschool-api',
-        audience: 'intelligeschool-client',
-      });
+      token = signAuthToken(buildTokenPayload(user, updatedUser.sessionVersion));
     } catch (jwtErr) {
       console.error('Login JWT sign error:', jwtErr?.message || jwtErr);
       return res.status(500).json({
@@ -259,13 +294,7 @@ const login = async (req, res) => {
       });
     }
 
-    const csrfToken = generateCsrfToken();
-    const cookieOptions = getCookieOptions();
-    // JWT and hex CSRF are cookie-safe; avoid encodeURIComponent (breaks '=' in JWT, inflates size).
-    res.setHeader('Set-Cookie', [
-      serializeCookie(AUTH_COOKIE_NAME, token, { ...cookieOptions.auth, encodeValue: false }),
-      serializeCookie(CSRF_COOKIE_NAME, csrfToken, { ...cookieOptions.csrf, encodeValue: false }),
-    ]);
+    const csrfToken = setAuthCookies(res, token);
 
     // ============================================
     // 11. RETURN SUCCESS RESPONSE
@@ -379,11 +408,17 @@ const verifyToken = async (req, res) => {
  */
 const logout = async (req, res) => {
   try {
-    const cookieOptions = getCookieOptions();
-    res.setHeader('Set-Cookie', [
-      serializeCookie(AUTH_COOKIE_NAME, '', { ...cookieOptions.auth, maxAge: 0, encodeValue: false }),
-      serializeCookie(CSRF_COOKIE_NAME, '', { ...cookieOptions.csrf, maxAge: 0, encodeValue: false }),
-    ]);
+    await prisma.user.update({
+      where: { userId: String(req.user.userId) },
+      data: {
+        sessionVersion: {
+          increment: 1,
+        },
+        sessionRevokedAt: new Date(),
+      },
+    });
+
+    clearAuthCookies(res);
     
     res.status(200).json({
       success: true,
@@ -402,8 +437,136 @@ const logout = async (req, res) => {
   }
 };
 
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'currentPassword and newPassword are required.',
+      });
+    }
+
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return res.status(400).json({
+        success: false,
+        error: passwordError,
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { userId: String(req.user.userId) },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        fullName: true,
+        role: true,
+        schoolId: true,
+        passwordHash: true,
+        school: {
+          select: {
+            schoolCode: true,
+            schoolName: true,
+          },
+        },
+        student: { select: { classId: true } },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found.',
+      });
+    }
+
+    const currentMatches = await bcrypt.compare(currentPassword, user.passwordHash || '');
+    if (!currentMatches) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is incorrect.',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const updatedUser = await prisma.user.update({
+      where: { userId: user.userId },
+      data: {
+        passwordHash,
+        sessionVersion: {
+          increment: 1,
+        },
+        sessionRevokedAt: null,
+      },
+      select: {
+        sessionVersion: true,
+      },
+    });
+
+    const token = signAuthToken(buildTokenPayload(user, updatedUser.sessionVersion));
+    const csrfToken = setAuthCookies(res, token);
+    const payload = await buildUserPayload(user);
+
+    writeAudit('auth.password_changed', {
+      userId: user.userId,
+      ip: req.ip,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password changed successfully.',
+      data: {
+        user: payload,
+        csrfToken,
+      },
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to change password.',
+    });
+  }
+};
+
+const revokeSessions = async (req, res) => {
+  try {
+    await prisma.user.update({
+      where: { userId: String(req.user.userId) },
+      data: {
+        sessionVersion: {
+          increment: 1,
+        },
+        sessionRevokedAt: new Date(),
+      },
+    });
+
+    clearAuthCookies(res);
+    writeAudit('auth.sessions_revoked', {
+      userId: req.user.userId,
+      ip: req.ip,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'All active sessions have been revoked.',
+    });
+  } catch (error) {
+    console.error('Revoke sessions error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to revoke sessions.',
+    });
+  }
+};
+
 module.exports = {
   login,
   verifyToken,
-  logout
+  logout,
+  changePassword,
+  revokeSessions,
 };

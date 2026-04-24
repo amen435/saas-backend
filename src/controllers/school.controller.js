@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const prisma = require('../config/database');
 const { getSchoolLogo, setSchoolLogo, withAssetUrl } = require('../utils/branding.utils');
 const { validatePasswordStrength } = require('../utils/password.utils');
+const { decryptText, encryptText } = require('../utils/encryption.utils');
 
 const canAccessSchool = (req, schoolId) => {
   const effectiveRole = req.user?.activeRole || req.user?.role;
@@ -18,6 +19,7 @@ const decorateSchool = async (req, school) => {
   const logo = await getSchoolLogo(school.schoolId);
   return {
     ...school,
+    address: school.address ? decryptText(school.address) : null,
     logo: withAssetUrl(req, logo),
   };
 };
@@ -110,7 +112,7 @@ const createSchool = async (req, res) => {
         data: {
           schoolCode,
           schoolName,
-          address: address || null,
+          address: address ? encryptText(address) : null,
           city: city || null,
           country: country || 'Ethiopia',
           expiryDate: expiryDate ? new Date(expiryDate) : null,
@@ -298,7 +300,7 @@ const updateSchool = async (req, res) => {
       where: { schoolId: numericSchoolId },
       data: {
         schoolName: schoolName || school.schoolName,
-        address: address !== undefined ? address : school.address,
+        address: address !== undefined ? (address ? encryptText(address) : null) : school.address,
         city: city !== undefined ? city : school.city,
         country: country || school.country,
         expiryDate: expiryDate ? new Date(expiryDate) : school.expiryDate,
@@ -355,7 +357,7 @@ const updateSchoolLogo = async (req, res) => {
       });
     }
 
-    const relativePath = `/uploads/school-logos/${req.file.filename}`;
+    const relativePath = req.file.assetPath || `/uploads/school-logos/${req.file.filename}`;
     await setSchoolLogo(numericSchoolId, relativePath);
 
     res.status(200).json({

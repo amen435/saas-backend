@@ -5,6 +5,7 @@ const router = express.Router();
 const studentController = require('../controllers/student.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole } = require('../middleware/rbac.middleware');
+const { checkOwnership } = require('../middleware/ownership.middleware');
 
 // All routes require authentication
 router.use(authenticateToken);
@@ -32,20 +33,20 @@ router.get('/', studentController.getMyClassStudents);
  * @desc    Get single student
  * @access  HOMEROOM_TEACHER (of student's class)
  */
-router.get('/:studentId', studentController.getStudentById);
+router.get('/:studentId', checkOwnership({ studentIdSources: ['params.studentId'] }), studentController.getStudentById);
 
 /**
  * @route   PUT /api/students/:studentId
  * @desc    Update student
  * @access  HOMEROOM_TEACHER (of student's class)
  */
-router.put('/:studentId', studentController.updateStudent);
+router.put('/:studentId', checkOwnership({ studentIdSources: ['params.studentId'] }), studentController.updateStudent);
 
 /**
  * @route   PATCH /api/students/:studentId/deactivate
  * @desc    Deactivate student
  * @access  HOMEROOM_TEACHER (of student's class)
  */
-router.patch('/:studentId/deactivate', studentController.deactivateStudent);
+router.patch('/:studentId/deactivate', checkOwnership({ studentIdSources: ['params.studentId'] }), studentController.deactivateStudent);
 
 module.exports = router;

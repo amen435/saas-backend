@@ -41,6 +41,8 @@ const authenticateToken = async (req, res, next) => {
         role: true,
         schoolId: true,
         isActive: true,
+        sessionVersion: true,
+        sessionRevokedAt: true,
         student: { select: { classId: true } },
       },
     });
@@ -52,12 +54,37 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
+    const tokenSessionVersion = Number.isInteger(Number(decoded.sessionVersion))
+      ? Number(decoded.sessionVersion)
+      : 0;
+    const currentSessionVersion = Number.isInteger(Number(user.sessionVersion))
+      ? Number(user.sessionVersion)
+      : 0;
+
+    if (tokenSessionVersion !== currentSessionVersion) {
+      return res.status(401).json({
+        success: false,
+        error: 'Session is no longer valid.'
+      });
+    }
+
+    if (user.sessionRevokedAt && decoded.iat) {
+      const issuedAt = Number(decoded.iat) * 1000;
+      if (issuedAt <= new Date(user.sessionRevokedAt).getTime()) {
+        return res.status(401).json({
+          success: false,
+          error: 'Session is no longer valid.'
+        });
+      }
+    }
+
     req.user = {
       userId: user.userId,
       role: user.role,
       schoolId: user.schoolId,
       classId: user.student?.classId ?? null,
       activeRole: user.role,
+      sessionVersion: currentSessionVersion,
     };
 
     // ============================================

@@ -1,15 +1,11 @@
 const crypto = require('crypto');
+const {
+  buildImageDataUri,
+  sanitizeBase64Image,
+} = require('../utils/imageSecurity.utils');
 
 function createUploadError(message, statusCode) {
   return Object.assign(new Error(message), { statusCode });
-}
-
-function inferImageExtension(imageBase64) {
-  const raw = String(imageBase64 || '').trim().toLowerCase();
-  if (raw.startsWith('data:image/png')) return 'png';
-  if (raw.startsWith('data:image/webp')) return 'webp';
-  if (raw.startsWith('data:image/jpg') || raw.startsWith('data:image/jpeg')) return 'jpg';
-  return 'jpg';
 }
 
 function ensureDataUri(imageBase64) {
@@ -18,13 +14,8 @@ function ensureDataUri(imageBase64) {
     throw createUploadError('Image is required for upload.', 400);
   }
 
-  if (raw.startsWith('data:image/')) {
-    return raw;
-  }
-
-  const extension = inferImageExtension(raw);
-  const mimeType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
-  return `data:${mimeType};base64,${raw}`;
+  const sanitized = sanitizeBase64Image(raw);
+  return buildImageDataUri(sanitized.buffer, sanitized.mimeType);
 }
 
 function getCloudinaryConfig() {
@@ -114,6 +105,7 @@ async function uploadImage({ imageBase64, entity, identifier }) {
     throw createUploadError('Image is required for upload.', 400);
   }
 
+  const sanitized = sanitizeBase64Image(raw);
   const cloudinaryResult = await uploadToCloudinary({ imageBase64: raw, entity, identifier });
   if (cloudinaryResult?.photoUrl) {
     return cloudinaryResult;
@@ -121,7 +113,7 @@ async function uploadImage({ imageBase64, entity, identifier }) {
 
   const safeEntity = String(entity || 'images').trim().toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'images';
   const safeIdentifier = String(identifier || Date.now()).trim().replace(/[^a-zA-Z0-9-_]/g, '') || String(Date.now());
-  const extension = inferImageExtension(raw);
+  const extension = sanitized.mimeType === 'image/png' ? 'png' : 'jpg';
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   return {

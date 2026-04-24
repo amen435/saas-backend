@@ -3,11 +3,11 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
-const path = require('path');
 require('dotenv').config();
 
 const { requireCsrfProtection } = require('./middleware/auth.middleware');
 const { AUTH_COOKIE_NAME, parseCookies } = require('./utils/security.utils');
+const { resolvePrivateUploadPath } = require('./utils/imageSecurity.utils');
 
 const authRoutes = require('./routes/auth.routes');
 const schoolRoutes = require('./routes/school.routes');
@@ -36,10 +36,7 @@ const aiHomeworkRoutes = require('./ai/routes/aiHomework.routes');
 const aiAnalyticsRoutes = require('./ai/routes/aiAnalytics.routes');
 
 const app = express();
-const uploadsDir = path.join(__dirname, '..', 'uploads');
 const isProduction = (process.env.NODE_ENV || 'development') === 'production';
-
-fs.mkdirSync(uploadsDir, { recursive: true });
 
 if (isProduction) {
   app.set('trust proxy', 1);
@@ -153,8 +150,8 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
+  windowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  max: Number(process.env.API_RATE_LIMIT_MAX || 300),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -164,16 +161,22 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
-app.use(
-  '/uploads',
-  express.static(uploadsDir, {
-    setHeaders: (res) => {
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Cache-Control', 'private, max-age=3600');
-    },
-  })
-);
+app.get('/uploads/:category/:filename', (req, res) => {
+  const assetPath = `/uploads/${req.params.category}/${req.params.filename}`;
+  const absolutePath = resolvePrivateUploadPath(assetPath);
+
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Asset not found.',
+    });
+  }
+
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  return res.sendFile(absolutePath);
+});
 
 app.get('/api', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });

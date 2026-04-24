@@ -249,6 +249,8 @@ model User {
   isActive       Boolean   @default(true)
   failedAttempts Int       @default(0)
   lockedUntil    DateTime?
+  sessionVersion Int       @default(0)
+  sessionRevokedAt DateTime?
   lastLogin      DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

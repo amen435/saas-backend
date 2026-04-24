@@ -6,6 +6,7 @@ const gradeController = require('../controllers/grade.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole, requireAnyPermission } = require('../middleware/rbac.middleware');
 const {
+  checkOwnership,
   ensureStudentOwnsStudentParam,
   ensureParentOwnsStudentParam,
 } = require('../middleware/ownership.middleware');
@@ -114,6 +115,7 @@ router.get(
   '/student/:studentId',
   requireAnyPermission(['grades:read', 'grades:read:self', 'grades:read:child', 'school:manage']),
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'STUDENT', 'PARENT', 'SCHOOL_ADMIN']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
   ensureStudentOwnsStudentParam,
   ensureParentOwnsStudentParam,
   auditAuthorizedAccess('grades.read.student'),
@@ -167,6 +169,7 @@ router.get(
   '/student-rank/:studentId',
   requireAnyPermission(['grades:read', 'grades:read:self', 'grades:read:child', 'school:manage']),
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'STUDENT', 'PARENT', 'SCHOOL_ADMIN']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
   ensureStudentOwnsStudentParam,
   ensureParentOwnsStudentParam,
   auditAuthorizedAccess('grades.read.student_rank'),
@@ -178,6 +181,7 @@ router.get(
   '/student-summary/:studentId',
   requireAnyPermission(['grades:read', 'grades:read:self', 'grades:read:child', 'school:manage']),
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'STUDENT', 'PARENT', 'SCHOOL_ADMIN']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
   ensureStudentOwnsStudentParam,
   ensureParentOwnsStudentParam,
   auditAuthorizedAccess('grades.read.student_summary'),

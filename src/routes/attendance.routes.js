@@ -6,6 +6,7 @@ const attendanceController = require('../controllers/attendance.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole, requireAnyPermission } = require('../middleware/rbac.middleware');
 const {
+  checkOwnership,
   ensureStudentOwnsStudentParam,
   ensureParentOwnsStudentParam,
 } = require('../middleware/ownership.middleware');
@@ -16,6 +17,11 @@ const { recognizeAttendanceSchema } = require('../validation/attendanceRecogniti
 
 router.post(
   '/recognize',
+  authenticateToken,
+  requireAnyPermission(['attendance:write', 'attendance:write:assigned', 'school:manage']),
+  requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'SCHOOL_ADMIN']),
+  checkOwnership({ classIdSources: ['body.classId'] }),
+  auditAuthorizedAccess('attendance.write.recognize'),
   validateBody(recognizeAttendanceSchema),
   attendanceController.recognizeAttendance
 );
@@ -89,6 +95,7 @@ router.get(
     'school:manage',
   ]),
   requireRole(['TEACHER', 'HOMEROOM_TEACHER', 'STUDENT', 'PARENT', 'SCHOOL_ADMIN']),
+  checkOwnership({ studentIdSources: ['params.studentId'] }),
   ensureStudentOwnsStudentParam,
   ensureParentOwnsStudentParam,
   auditAuthorizedAccess('attendance.read.student'),

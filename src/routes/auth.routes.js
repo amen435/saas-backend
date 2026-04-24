@@ -61,5 +61,7 @@ router.get('/verify', authenticateToken, authController.verifyToken);
  * @access  Private
  */
 router.post('/logout', authenticateToken, authController.logout);
+router.post('/change-password', authenticateToken, authController.changePassword);
+router.post('/revoke-sessions', authenticateToken, authController.revokeSessions);
 
 module.exports = router;

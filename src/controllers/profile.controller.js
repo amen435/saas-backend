@@ -82,7 +82,7 @@ const updateProfilePhoto = async (req, res) => {
       });
     }
 
-    const relativePath = `/uploads/profile-images/${req.file.filename}`;
+    const relativePath = req.file.assetPath || `/uploads/profile-images/${req.file.filename}`;
     await setUserProfileImage(userId, relativePath);
 
     return res.status(200).json({

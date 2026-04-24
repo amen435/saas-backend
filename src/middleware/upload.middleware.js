@@ -1,51 +1,59 @@
-const fs = require('fs');
-const path = require('path');
 const multer = require('multer');
-
-const ALLOWED_IMAGE_TYPES = new Map([
-  ['image/jpeg', ['.jpg', '.jpeg']],
-  ['image/png', ['.png']],
-  ['image/webp', ['.webp']],
-]);
-
-const ensureUploadDir = (relativeDir) => {
-  const targetDir = path.join(__dirname, '..', '..', 'uploads', relativeDir);
-  fs.mkdirSync(targetDir, { recursive: true });
-  return targetDir;
-};
-
-const createStorage = (relativeDir, filePrefix) =>
-  multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, ensureUploadDir(relativeDir));
-    },
-    filename: (req, file, cb) => {
-      const extension = path.extname(file.originalname || '').toLowerCase() || '.png';
-      const safePrefix = String(filePrefix || 'upload').replace(/[^a-z0-9_-]/gi, '_');
-      cb(null, `${safePrefix}-${Date.now()}${extension}`);
-    },
-  });
+const {
+  MAX_IMAGE_BYTES,
+  persistPrivateImage,
+  sanitizeImageBuffer,
+} = require('../utils/imageSecurity.utils');
 
 const imageFileFilter = (req, file, cb) => {
   const mimeType = String(file?.mimetype || '').toLowerCase();
-  const extension = path.extname(file?.originalname || '').toLowerCase();
-  const allowedExtensions = ALLOWED_IMAGE_TYPES.get(mimeType);
-
-  if (!allowedExtensions || !allowedExtensions.includes(extension)) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
     return cb(new Error('Only JPG, PNG, and WebP image uploads are allowed.'));
   }
 
   cb(null, true);
 };
 
-const createImageUpload = (relativeDir, filePrefix) =>
-  multer({
-    storage: createStorage(relativeDir, filePrefix),
+function createImageUpload(relativeDir) {
+  const upload = multer({
+    storage: multer.memoryStorage(),
     limits: {
-      fileSize: 5 * 1024 * 1024,
+      fileSize: MAX_IMAGE_BYTES,
+      files: 1,
     },
     fileFilter: imageFileFilter,
   });
+
+  const finalizeUpload = async (req, res, next) => {
+    try {
+      if (!req.file?.buffer) {
+        return next();
+      }
+
+      const processedImage = await sanitizeImageBuffer(req.file.buffer);
+      const storedImage = persistPrivateImage(relativeDir, processedImage);
+
+      req.file = {
+        ...req.file,
+        filename: storedImage.filename,
+        path: storedImage.absolutePath,
+        mimetype: storedImage.mimeType,
+        size: storedImage.size,
+        assetPath: storedImage.relativeAssetPath,
+      };
+
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  return {
+    single(fieldName) {
+      return [upload.single(fieldName), finalizeUpload];
+    },
+  };
+}
 
 module.exports = {
   createImageUpload,
