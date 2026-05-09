@@ -22,6 +22,8 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
       - key: COOKIE_SAME_SITE
         value: None
       - key: JWT_EXPIRY

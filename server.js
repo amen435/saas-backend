@@ -15,12 +15,20 @@ const HOST = process.env.HOST || '0.0.0.0';
 const isProduction = (process.env.NODE_ENV || 'development') === 'production';
 
 const assertRequiredEnv = () => {
-  const missing = ['DATABASE_URL', 'JWT_SECRET'].filter(
+  const missing = ['DATABASE_URL', 'JWT_SECRET', 'DATA_ENCRYPTION_KEY'].filter(
     (key) => !String(process.env[key] || '').trim()
   );
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+
+  const dataEncryptionKey = String(process.env.DATA_ENCRYPTION_KEY || '').trim();
+  const keyBuffer = /^[0-9a-f]{64}$/i.test(dataEncryptionKey)
+    ? Buffer.from(dataEncryptionKey, 'hex')
+    : Buffer.from(dataEncryptionKey, 'base64');
+  if (keyBuffer.length !== 32) {
+    throw new Error('DATA_ENCRYPTION_KEY must be 32 bytes (64 hex chars or base64).');
   }
 
   const dbUrl = String(process.env.DATABASE_URL || '');
