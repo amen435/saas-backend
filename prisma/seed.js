@@ -434,6 +434,109 @@ async function main() {
     console.log(`✅ ${teacherUser.fullName} assigned to Science\n`);
 
     // ============================================
+    // 9. CREATE STUDENT
+    // ============================================
+    console.log('🎓 Creating Student...\n');
+
+    const studentPlaintext = process.env.SEED_STUDENT_PASSWORD || 'ChangeMe-Student!123';
+    const studentPassword = await bcrypt.hash(studentPlaintext, 10);
+
+    const studentUser = await prisma.user.upsert({
+      where: { userId: 'boleST001' },
+      update: {},
+      create: {
+        userId: 'boleST001',
+        username: 'student.dawit',
+        email: 'dawit@bole.et',
+        passwordHash: studentPassword,
+        role: 'STUDENT',
+        schoolId: createdSchools[0].schoolId,
+        fullName: 'Dawit Tadesse',
+        phone: '+251933111111',
+        isActive: true,
+      },
+    });
+
+    const student = await prisma.student.upsert({
+      where: { userId: studentUser.userId },
+      update: {},
+      create: {
+        userId: studentUser.userId,
+        schoolId: createdSchools[0].schoolId,
+        classId: sampleClass.classId,
+        studentCode: 'BIS-8A-001',
+        dateOfBirth: new Date('2011-05-15'),
+        gender: 'Male',
+        guardianName: 'Alem Tadesse',
+        guardianPhone: '+251944111111',
+        address: 'Bole, Addis Ababa',
+        faceEmbedding: [],
+        isActive: true,
+      },
+    });
+
+    console.log(`✅ ${studentUser.fullName} (${studentUser.username})`);
+    console.log(`   Class: ${sampleClass.className}`);
+    console.log(`   Student Code: ${student.studentCode}\n`);
+
+    // ============================================
+    // 10. CREATE PARENT & LINK TO STUDENT
+    // ============================================
+    console.log('👨‍👩‍👧 Creating Parent...\n');
+
+    const parentPlaintext = process.env.SEED_PARENT_PASSWORD || 'ChangeMe-Parent!123';
+    const parentPassword = await bcrypt.hash(parentPlaintext, 10);
+
+    const parentUser = await prisma.user.upsert({
+      where: { userId: 'bolePR001' },
+      update: {},
+      create: {
+        userId: 'bolePR001',
+        username: 'parent.alem',
+        email: 'alem.tadesse@bole.et',
+        passwordHash: parentPassword,
+        role: 'PARENT',
+        schoolId: createdSchools[0].schoolId,
+        fullName: 'Alem Tadesse',
+        phone: '+251944111111',
+        isActive: true,
+      },
+    });
+
+    const parent = await prisma.parent.upsert({
+      where: { userId: parentUser.userId },
+      update: {},
+      create: {
+        userId: parentUser.userId,
+        schoolId: createdSchools[0].schoolId,
+        relationship: 'Father',
+        occupation: 'Engineer',
+        phoneNumber: '+251944111111',
+        address: 'Bole, Addis Ababa',
+        isActive: true,
+      },
+    });
+
+    await prisma.parentStudent.upsert({
+      where: {
+        parentId_studentId: {
+          parentId: parent.parentId,
+          studentId: student.studentId,
+        },
+      },
+      update: {},
+      create: {
+        parentId: parent.parentId,
+        studentId: student.studentId,
+        relationship: 'Father',
+        isPrimary: true,
+      },
+    });
+
+    console.log(`✅ ${parentUser.fullName} (${parentUser.username})`);
+    console.log(`   Linked to: ${studentUser.fullName}\n`);
+
+    // ============================================
     // SUMMARY
     // ============================================
     // ============================================
